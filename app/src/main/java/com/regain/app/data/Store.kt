@@ -10,7 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * All of Regain's own state, in one small SharedPreferences file.
+ * All of Focus's own state, in one small SharedPreferences file.
  *
  * Screen time itself is NOT stored here: Android already records it, and we
  * read it on demand (see [UsageRepository]). That avoids a second always-on

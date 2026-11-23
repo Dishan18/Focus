@@ -222,7 +222,7 @@ private fun RunningFocus(session: Store.FocusSession, now: Long) {
         }
         Spacer(Modifier.height(28.dp))
         RText(
-            "Put the phone down. Regain will buzz you\nif you pick it back up.",
+            "Put the phone down. Focus will buzz you\nif you pick it back up.",
             style = RTheme.type.subhead, color = RColors.Secondary, align = TextAlign.Center,
         )
         Spacer(Modifier.weight(1f))

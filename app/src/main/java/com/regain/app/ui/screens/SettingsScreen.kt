@@ -138,7 +138,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             val battery = Permissions.isIgnoringBatteryOptimizations(ctx)
             Section(
                 header = "Health check",
-                footer = "On Realme, also open App info → Battery → allow background activity, and lock Regain in Recents so it is never closed.",
+                footer = "On Realme, also open App info → Battery → allow background activity, and lock Focus in Recents so it is never closed.",
             ) {
                 StatusRow("Usage access", usage) {
                     Permissions.launch(ctx, Permissions.usageAccessIntent(ctx), Permissions.usageAccessFallbackIntent())
@@ -155,7 +155,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item {
-            Section(footer = "Regain has no internet permission. Nothing you do here ever leaves your phone.") {
+            Section(footer = "Focus has no internet permission. Nothing you do here ever leaves your phone.") {
                 ListRow("Version", value = BuildConfig.VERSION_NAME, leading = { IconTile(RIcons.Shield, RColors.Accent) })
             }
             Spacer(Modifier.height(20.dp))

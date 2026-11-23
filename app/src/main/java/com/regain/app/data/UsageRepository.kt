@@ -8,7 +8,7 @@ import android.content.pm.PackageManager
 import com.regain.app.core.TimeUtil
 
 /**
- * Reads screen time straight from Android's own usage log, so Regain never
+ * Reads screen time straight from Android's own usage log, so Focus never
  * runs a second tracker in the background.
  *
  * Foreground time is rebuilt from RESUMED / PAUSED events per activity, so

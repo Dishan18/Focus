@@ -1,4 +1,4 @@
-# Regain
+# Focus
 
 A calm, dark, iOS-styled Android app that helps you use your phone less. It's gentle by default and firm when it needs to be.
 
@@ -31,11 +31,11 @@ Everything stays on the phone: the app has **no internet permission**.
 
 ## Installing (for testers)
 
-1. Download the latest `Regain-vX.Y.Z.apk` from **Releases** and open it to install.
-2. Open Regain and follow the setup steps:
-   - **Usage access:** switch Regain on.
+1. Download the latest `Focus-vX.Y.Z.apk` from **Releases** and open it to install.
+2. Open Focus and follow the setup steps:
+   - **Usage access:** switch Focus on.
    - **Accessibility:** if Android says *"Restricted setting"*, open **App info → ⋮ → Allow restricted settings**, then turn the service on.
-   - **Realme / ColorOS:** **App info → Battery → Allow background activity**, and lock Regain in Recents.
+   - **Realme / ColorOS:** **App info → Battery → Allow background activity**, and lock Focus in Recents.
 
 ## Battery and memory design
 

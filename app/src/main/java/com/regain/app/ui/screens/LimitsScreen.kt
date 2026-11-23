@@ -92,7 +92,7 @@ fun LimitsScreen() {
                         RText("No limits yet", style = RTheme.type.title3)
                         Spacer(Modifier.height(4.dp))
                         RText(
-                            "Pick the apps that eat your time and give each a daily budget. Regain steps in when it runs out.",
+                            "Pick the apps that eat your time and give each a daily budget. Focus steps in when it runs out.",
                             color = RColors.Secondary, style = RTheme.type.subhead,
                         )
                         Spacer(Modifier.height(16.dp))

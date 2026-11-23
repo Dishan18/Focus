@@ -115,10 +115,10 @@ fun OnboardingScreen(onDone: () -> Unit, returning: Boolean) {
                         1 -> PermissionStep(
                             icon = RIcons.Insights,
                             title = "See your screen time",
-                            body = "Regain reads Android's own usage log to know how long you spend in each app. It's how limits work, and it never leaves your phone.",
+                            body = "Focus reads Android's own usage log to know how long you spend in each app. It's how limits work, and it never leaves your phone.",
                             granted = usage,
                             grantLabel = "Allow usage access",
-                            hint = "Find Regain in the list and switch it on.",
+                            hint = "Find Focus in the list and switch it on.",
                             onGrant = { Permissions.launch(ctx, Permissions.usageAccessIntent(ctx), Permissions.usageAccessFallbackIntent()) },
                             onNext = { go(2) },
                         )
@@ -147,7 +147,7 @@ private fun ColumnScope.Welcome(onNext: () -> Unit) {
     Spacer(Modifier.weight(1f))
     Bloom(0.9f, petals = 7, modifier = Modifier.size(240.dp))
     Spacer(Modifier.height(24.dp))
-    RText("Regain", style = RTheme.type.largeTitle.copy(fontSize = RTheme.type.largeTitle.fontSize * 1.3f))
+    RText("Focus", style = RTheme.type.largeTitle.copy(fontSize = RTheme.type.largeTitle.fontSize * 1.3f))
     Spacer(Modifier.height(8.dp))
     RText("Take your time back, gently.", style = RTheme.type.title3, color = RColors.Secondary)
     Spacer(Modifier.weight(1.2f))
@@ -195,8 +195,8 @@ private fun ColumnScope.PermissionStep(
 private fun ColumnScope.AccessibilityStep(granted: Boolean, onGrant: () -> Unit, onAppInfo: () -> Unit, onNext: () -> Unit) {
     StepHeader(
         RIcons.Shield,
-        "Let Regain step in",
-        "To show the pause and time's-up screens over an app, Regain uses an accessibility service. It only sees which app is open, never what's on screen or what you type.",
+        "Let Focus step in",
+        "To show the pause and time's-up screens over an app, Focus uses an accessibility service. It only sees which app is open, never what's on screen or what you type.",
         granted,
     )
     if (!granted && Build.VERSION.SDK_INT >= 33) {
@@ -215,7 +215,7 @@ private fun ColumnScope.AccessibilityStep(granted: Boolean, onGrant: () -> Unit,
     if (granted) {
         PrimaryButton("Continue", onNext, haptic = Haptics.Kind.Success)
     } else {
-        RText("Open Installed apps (or Downloaded apps) → Regain → turn it on.", style = RTheme.type.footnote, color = RColors.Secondary, align = TextAlign.Center)
+        RText("Open Installed apps (or Downloaded apps) → Focus → turn it on.", style = RTheme.type.footnote, color = RColors.Secondary, align = TextAlign.Center)
         Spacer(Modifier.height(12.dp))
         PrimaryButton("Turn on", onGrant)
         Spacer(Modifier.height(8.dp))
@@ -228,8 +228,8 @@ private fun ColumnScope.AccessibilityStep(granted: Boolean, onGrant: () -> Unit,
 private fun ColumnScope.BatteryStep(unrestricted: Boolean, onBattery: () -> Unit, onAppInfo: () -> Unit, onNext: () -> Unit) {
     StepHeader(
         RIcons.Battery,
-        "Keep Regain awake",
-        "Realme phones close background apps aggressively. Regain uses almost no battery, since it only wakes when you switch apps, but it needs permission to stay.",
+        "Keep Focus awake",
+        "Realme phones close background apps aggressively. Focus uses almost no battery, since it only wakes when you switch apps, but it needs permission to stay.",
         unrestricted,
     )
     Spacer(Modifier.height(18.dp))
@@ -237,7 +237,7 @@ private fun ColumnScope.BatteryStep(unrestricted: Boolean, onBattery: () -> Unit
         "On Realme",
         listOf(
             "Open App info → Battery → turn on “Allow background activity”.",
-            "Open Recents, swipe down on Regain's card (or tap ⋮) and choose Lock.",
+            "Open Recents, swipe down on Focus's card (or tap ⋮) and choose Lock.",
         ),
     )
     Spacer(Modifier.weight(1f))
@@ -259,7 +259,7 @@ private fun ColumnScope.Done(canFinish: Boolean, onFinish: () -> Unit, onBack: (
     RText(if (canFinish) "You're all set" else "Almost there", style = RTheme.type.title1)
     Spacer(Modifier.height(10.dp))
     RText(
-        if (canFinish) "Add a limit to your first time-sink app. Regain handles the rest."
+        if (canFinish) "Add a limit to your first time-sink app. Focus handles the rest."
         else "Usage access and the accessibility service are both needed for limits to work.",
         color = RColors.Secondary, align = TextAlign.Center,
     )

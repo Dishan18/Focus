@@ -57,7 +57,7 @@ import com.regain.app.ui.theme.RColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Ticks whenever the screen resumes or Regain's own data changes. */
+/** Ticks whenever the screen resumes or Focus's own data changes. */
 @Composable
 fun rememberRefreshKey(): Long {
     var resumes by remember { mutableIntStateOf(0) }

@@ -88,7 +88,7 @@ fun InsightsScreen() {
             Section(header = "Why you opened limited apps") {
                 if (intents.isEmpty()) {
                     RText(
-                        "Each time you open a limited app, Regain asks why. Your answers show up here.",
+                        "Each time you open a limited app, Focus asks why. Your answers show up here.",
                         style = RTheme.type.subhead, color = RColors.Secondary, modifier = Modifier.padding(16.dp),
                     )
                 } else {

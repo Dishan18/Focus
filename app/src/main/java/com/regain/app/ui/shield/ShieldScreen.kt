@@ -408,7 +408,7 @@ private fun ColumnScope.FocusStage(pkg: String, label: String, actions: ShieldAc
         // deliberate hold on the Focus tab.
         RText(
             if (focus?.strict == true) "Strict focus can't be ended early"
-            else "To end early, hold the button on Regain's Focus tab",
+            else "To end early, hold the button on the Focus tab",
             style = RTheme.type.footnote, color = RColors.Tertiary,
         )
     }
