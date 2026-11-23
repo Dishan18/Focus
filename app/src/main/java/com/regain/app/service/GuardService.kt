@@ -18,7 +18,9 @@ import android.view.inputmethod.InputMethodManager
 import android.util.Log
 import com.regain.app.BuildConfig
 import com.regain.app.RegainApp
+import com.regain.app.core.Grayscale
 import com.regain.app.core.Haptics
+import com.regain.app.widget.FocusWidget
 import com.regain.app.core.TimeUtil
 import com.regain.app.data.Store
 import com.regain.app.ui.shield.ShieldActivity
@@ -43,6 +45,8 @@ class GuardService : AccessibilityService() {
     private var current: String? = null
     private var pass: String? = null
     private var inOwnUi = false
+    /** True between our activity's onResume and onPause: nothing else can be in front. */
+    private var ownUiVisible = false
     private var screenOn = true
     private var presentHandled = false
     private var launchers: Set<String> = emptySet()
@@ -65,7 +69,12 @@ class GuardService : AccessibilityService() {
         workerThread = HandlerThread("regain-guard").also { it.start() }
         worker = Handler(workerThread.looper)
         overlays = Overlays(this)
-        worker.post { refreshSystemPackages() }
+        worker.post {
+            refreshSystemPackages()
+            // Safety: never leave the screen gray from a previous run.
+            Grayscale.off(this)
+            scheduleWindDown()
+        }
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -86,6 +95,7 @@ class GuardService : AccessibilityService() {
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { unregisterReceiver(packageReceiver) }
         main.post { overlays.clearAll() }
+        Grayscale.off(this)
         if (::workerThread.isInitialized) workerThread.quitSafely()
         super.onDestroy()
     }
@@ -127,6 +137,8 @@ class GuardService : AccessibilityService() {
         // (see ownUiResumed): their accessibility events can arrive late,
         // e.g. while a gate is animating out, and would cancel live timers.
         if (pkg == packageName) return
+        // Late events from the app underneath a gate must not re-trigger it.
+        if (ownUiVisible) return
         if (pkg in ignored) return
         // Ignore transient system windows that are not real apps.
         if (pkg !in launchers && !app.catalog.isLaunchable(pkg)) return
@@ -145,25 +157,35 @@ class GuardService : AccessibilityService() {
     private fun evaluate(pkg: String) {
         if (!screenOn) return
         val now = System.currentTimeMillis()
-        if (!Store.isLimited(pkg)) return
 
-        if (Store.focus(now) != null) return shield(ShieldMode.Focus, pkg)
+        // Focus blocks limited apps plus Google search and Chrome.
+        if (Store.focus(now) != null && Store.blockedInFocus(pkg)) return shield(ShieldMode.Focus, pkg)
+
+        val budgets = Store.budgetsFor(pkg)
+        if (budgets.isEmpty()) return
+
         if (Store.isDowntime(now)) return shield(ShieldMode.Downtime, pkg)
         if (Store.morningGateRemaining(now) > 0) return shield(ShieldMode.Morning, pkg)
 
-        val allowedMs = (Store.allowedMinutes(pkg) ?: return) * TimeUtil.MINUTE
-        val used = app.usage.usedToday(pkg, now)
-        val remaining = allowedMs - used
-        log("evaluate $pkg used=$used allowed=$allowedMs remaining=$remaining pass=$pass")
-        if (remaining <= 0) return shield(ShieldMode.TimesUp, pkg)
+        // The tightest budget wins (own limit or a group it belongs to).
+        var remaining = Long.MAX_VALUE
+        var tightest = budgets.first()
+        for (b in budgets) {
+            val allowedMs = (Store.allowedMinutes(b.key) ?: continue) * TimeUtil.MINUTE
+            val left = allowedMs - app.usage.usedToday(b.pkgs, now)
+            if (left < remaining) { remaining = left; tightest = b }
+        }
+        if (remaining == Long.MAX_VALUE) return
+        log("evaluate $pkg budget=${tightest.key} remaining=$remaining pass=$pass")
+        if (remaining <= 0) return shield(ShieldMode.TimesUp, pkg, tightest.key)
 
         if (Store.pauseOn && pass != pkg) return shield(ShieldMode.Pause, pkg)
 
-        schedule(pkg, remaining)
+        schedule(pkg, remaining, tightest.key)
         setScrollEvents(Store.doomscrollOn)
     }
 
-    private fun schedule(pkg: String, remaining: Long) {
+    private fun schedule(pkg: String, remaining: Long, key: String) {
         cancelTimers()
         log("schedule $pkg in $remaining ms")
         val warnAt = remaining - 5 * TimeUtil.MINUTE
@@ -188,7 +210,10 @@ class GuardService : AccessibilityService() {
                     val elapsed = SystemClock.uptimeMillis() - start
                     val left = remaining - elapsed
                     val level = 1f - (left.toFloat() / (5 * TimeUtil.MINUTE)).coerceIn(0f, 1f)
-                    main.post { overlays.setDim(level) }
+                    main.post {
+                        overlays.setDim(level)
+                        if (Store.grayscaleOn) Grayscale.on(this@GuardService)
+                    }
                     if (left > 0) worker.postAtTime(this, timerToken, SystemClock.uptimeMillis() + 20_000)
                 }
             }
@@ -196,13 +221,16 @@ class GuardService : AccessibilityService() {
         }
 
         worker.postAtTime({
-            if (current == pkg && !inOwnUi && screenOn) shield(ShieldMode.TimesUp, pkg)
+            if (current == pkg && !inOwnUi && screenOn) shield(ShieldMode.TimesUp, pkg, key)
         }, timerToken, start + remaining)
     }
 
     private fun cancelTimers() {
         worker.removeCallbacksAndMessages(timerToken)
-        main.post { overlays.clearDim() }
+        main.post {
+            overlays.clearDim()
+            Grayscale.off(this@GuardService)
+        }
     }
 
     private fun leave() {
@@ -211,13 +239,41 @@ class GuardService : AccessibilityService() {
         scrollStreakStart = 0
     }
 
-    private fun shield(mode: ShieldMode, pkg: String) {
-        log("shield $mode $pkg")
+    private fun shield(mode: ShieldMode, pkg: String, key: String = pkg) {
+        log("shield $mode $pkg $key")
         cancelTimers()
         setScrollEvents(false)
         main.post {
-            runCatching { startActivity(ShieldActivity.intent(this, mode, pkg)) }
+            runCatching { startActivity(ShieldActivity.intent(this, mode, pkg, key)) }
         }
+    }
+
+    // ------------------------------------------------------------ wind-down
+
+    private val windToken = Any()
+
+    /** One gentle reminder at bedtime while the phone is in use. */
+    private fun scheduleWindDown() {
+        worker.removeCallbacksAndMessages(windToken)
+        if (!Store.windDownOn || !screenOn) return
+        val now = System.currentTimeMillis()
+        val minute = TimeUtil.minuteOfDay(now)
+        val bed = Store.bedtime
+        if (TimeUtil.inWindow(minute, bed, (bed + 180) % 1440)) {
+            if (now - Store.windDownLastShown > 12 * TimeUtil.HOUR) remindWindDown()
+            return
+        }
+        val inMin = ((bed - minute + 1440) % 1440).toLong()
+        val secs = java.util.Calendar.getInstance().get(java.util.Calendar.SECOND)
+        val delay = inMin * TimeUtil.MINUTE - secs * 1000L
+        worker.postAtTime({ scheduleWindDown() }, windToken, SystemClock.uptimeMillis() + delay.coerceAtLeast(1000))
+    }
+
+    private fun remindWindDown() {
+        Store.windDownLastShown = System.currentTimeMillis()
+        Haptics.play(Haptics.Kind.Breath)
+        val time = TimeUtil.formatMinuteOfDay(Store.bedtime)
+        main.postDelayed({ overlays.showPill("It's past $time · time to wind down", 0xFF5B4BDB.toInt(), 3600) }, 600)
     }
 
     // ------------------------------------------------------------ doomscroll
@@ -257,6 +313,7 @@ class GuardService : AccessibilityService() {
                     screenOn = false
                     presentHandled = false
                     leave()
+                    worker.removeCallbacksAndMessages(windToken)
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     val locked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
@@ -280,6 +337,8 @@ class GuardService : AccessibilityService() {
         } else if (Store.unlockPillOn) {
             main.postDelayed({ overlays.showPill("Unlock #$n today") }, 350)
         }
+        scheduleWindDown()
+        FocusWidget.requestUpdate(this, throttle = true)
         // Re-check the app that was open before the screen went off.
         val pkg = current
         if (pkg != null && pkg !in launchers && !inOwnUi) evaluate(pkg)
@@ -299,9 +358,12 @@ class GuardService : AccessibilityService() {
     private fun onOwnUi() = worker.post {
         log("own UI resumed")
         inOwnUi = true
+        ownUiVisible = true
         cancelTimers()
         setScrollEvents(false)
     }
+
+    private fun onOwnUiPaused() = worker.post { ownUiVisible = false }
 
     private fun recheck() = worker.post {
         val pkg = current ?: return@post
@@ -320,6 +382,9 @@ class GuardService : AccessibilityService() {
 
         /** Called from our activities' onResume. Returning to an app afterwards counts as a fresh switch. */
         fun ownUiResumed() { instance?.onOwnUi() }
+
+        /** Called from our activities' onPause. */
+        fun ownUiPaused() { instance?.onOwnUiPaused() }
 
         fun isRunning(): Boolean = instance != null
 

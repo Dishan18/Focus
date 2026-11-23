@@ -79,7 +79,7 @@ fun LargeTitleScreen(
                 Modifier
                     .fillMaxWidth()
                     .graphicsLayer { alpha = barAlpha }
-                    .background(Color(0xE6101012)),
+                    .background(Color(0xFA0C0C0E)),
             ) {
                 Column {
                     Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))

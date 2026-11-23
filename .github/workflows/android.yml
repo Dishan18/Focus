@@ -39,6 +39,8 @@ jobs:
 
       - name: Build release APK
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          BUDDY_PHONE: ${{ secrets.BUDDY_PHONE }}
         run: |
           ./gradlew assembleRelease --no-configuration-cache
           cp app/build/outputs/apk/release/app-release.apk "Focus-${GITHUB_REF_NAME}.apk"

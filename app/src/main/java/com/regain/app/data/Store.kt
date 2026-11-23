@@ -200,7 +200,128 @@ object Store {
         edit { putString("pendingLimits", p.toString()) }
     }
 
-    fun isLimited(pkg: String): Boolean = limits().containsKey(pkg)
+    /** True if the app has its own limit or belongs to a group. */
+    fun isLimited(pkg: String): Boolean = limits().containsKey(pkg) || groups().values.any { pkg in it.pkgs }
+
+    // ------------------------------------------------------------ groups
+
+    /** A shared daily budget across several apps, e.g. "Social · 1h". */
+    data class Group(val id: String, val name: String, val minutes: Int, val pkgs: Set<String>)
+
+    /** A budget is either one app (key = package) or a group (key = "g:<id>"). */
+    data class Budget(val key: String, val label: String?, val pkgs: Set<String>, val baseMinutes: Int) {
+        val isGroup get() = key.startsWith("g:")
+    }
+
+    private fun groupFromJson(id: String, o: JSONObject): Group {
+        val arr = o.optJSONArray("pkgs") ?: JSONArray()
+        return Group(id, o.optString("name", "Group"), o.optInt("min", 60), (0 until arr.length()).map { arr.getString(it) }.toSet())
+    }
+
+    private fun groupToJson(g: Group) = JSONObject()
+        .put("name", g.name).put("min", g.minutes).put("pkgs", JSONArray(g.pkgs.toList()))
+
+    fun groups(): Map<String, Group> {
+        applyPendingGroups()
+        val o = JSONObject(prefs.getString("groups", "{}") ?: "{}")
+        return buildMap { o.keys().forEach { id -> put(id, groupFromJson(id, o.getJSONObject(id))) } }
+    }
+
+    /** id -> what the group becomes tomorrow (null = deleted). */
+    fun pendingGroups(): Map<String, Group?> {
+        val p = JSONObject(prefs.getString("pendingGroups", "{}") ?: "{}")
+        return buildMap {
+            p.keys().forEach { id ->
+                val cfg = p.getJSONObject(id).optJSONObject("cfg")
+                put(id, cfg?.let { groupFromJson(id, it) })
+            }
+        }
+    }
+
+    private fun applyPendingGroups() {
+        val raw = prefs.getString("pendingGroups", "{}") ?: "{}"
+        if (raw == "{}") return
+        val p = JSONObject(raw)
+        val today = TimeUtil.dayKey()
+        val o = JSONObject(prefs.getString("groups", "{}") ?: "{}")
+        var changed = false
+        p.keys().asSequence().toList().forEach { id ->
+            val e = p.getJSONObject(id)
+            if (e.getInt("d") < today) {
+                val cfg = e.optJSONObject("cfg")
+                if (cfg == null) o.remove(id) else o.put(id, cfg)
+                p.remove(id)
+                changed = true
+            }
+        }
+        if (changed) prefs.edit().putString("groups", o.toString()).putString("pendingGroups", p.toString()).apply()
+    }
+
+    /**
+     * Save a group. Stricter edits (fewer minutes, more apps) apply now;
+     * anything looser waits until tomorrow. Returns true if applied now.
+     */
+    fun saveGroup(g: Group): Boolean {
+        val o = JSONObject(prefs.getString("groups", "{}") ?: "{}")
+        val p = JSONObject(prefs.getString("pendingGroups", "{}") ?: "{}")
+        val current = if (o.has(g.id)) groupFromJson(g.id, o.getJSONObject(g.id)) else null
+        val looser = current != null && (g.minutes > current.minutes || !g.pkgs.containsAll(current.pkgs))
+        return if (looser) {
+            p.put(g.id, JSONObject().put("d", TimeUtil.dayKey()).put("cfg", groupToJson(g)))
+            edit { putString("pendingGroups", p.toString()) }
+            false
+        } else {
+            o.put(g.id, groupToJson(g))
+            p.remove(g.id)
+            edit { putString("groups", o.toString()); putString("pendingGroups", p.toString()) }
+            true
+        }
+    }
+
+    /** Deleting a group also waits until tomorrow. */
+    fun deleteGroup(id: String) {
+        val p = JSONObject(prefs.getString("pendingGroups", "{}") ?: "{}")
+        p.put(id, JSONObject().put("d", TimeUtil.dayKey()).put("cfg", JSONObject.NULL))
+        edit { putString("pendingGroups", p.toString()) }
+    }
+
+    fun cancelPendingGroup(id: String) {
+        val p = JSONObject(prefs.getString("pendingGroups", "{}") ?: "{}")
+        p.remove(id)
+        edit { putString("pendingGroups", p.toString()) }
+    }
+
+    fun newGroupId(): String = System.currentTimeMillis().toString(36)
+
+    /** Every budget that applies to [pkg]: its own limit and any groups it is in. */
+    fun budgetsFor(pkg: String): List<Budget> = buildList {
+        limits()[pkg]?.let { add(Budget(pkg, null, setOf(pkg), it)) }
+        groups().values.filter { pkg in it.pkgs }.forEach { add(Budget("g:${it.id}", it.name, it.pkgs, it.minutes)) }
+    }
+
+    fun budget(key: String): Budget? =
+        if (key.startsWith("g:")) groups()[key.removePrefix("g:")]?.let { Budget(key, it.name, it.pkgs, it.minutes) }
+        else limits()[key]?.let { Budget(key, null, setOf(key), it) }
+
+    // ------------------------------------------------------------ weekends
+
+    /** 0 = same as weekdays, 1 = 1.5x, 2 = 2x on Saturday and Sunday. */
+    var weekendMode: Int
+        get() = prefs.getInt("weekendMode", 0)
+        set(v) = edit { putInt("weekendMode", v) }
+
+    fun isWeekend(now: Long = System.currentTimeMillis()): Boolean {
+        val d = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.DAY_OF_WEEK)
+        return d == java.util.Calendar.SATURDAY || d == java.util.Calendar.SUNDAY
+    }
+
+    /** A base limit adjusted for weekends. */
+    fun scaled(minutes: Int, now: Long = System.currentTimeMillis()): Int =
+        if (!isWeekend(now)) minutes else when (weekendMode) {
+            1 -> (minutes * 1.5f).toInt()
+            2 -> minutes * 2
+            else -> minutes
+        }
 
     // ------------------------------------------------------------ daily counters
 
@@ -238,7 +359,66 @@ object Store {
     }
 
     /** Minutes allowed today for [pkg], including extensions. Null if not limited. */
-    fun allowedMinutes(pkg: String): Int? = limits()[pkg]?.let { it + extraMinutes(pkg) }
+    fun allowedMinutes(key: String): Int? = budget(key)?.let { scaled(it.baseMinutes) + extraMinutes(key) }
+
+    // ------------------------------------------------------------ earned minutes
+
+    /** Minutes earned by finishing focus sessions today (1 per 5 focused, max 20). */
+    fun bonusMinutes(): Int = today().optInt("bonus")
+
+    private fun earnBonus(focusedMinutes: Int) {
+        if (focusedMinutes <= 0) return
+        val o = today()
+        o.put("bonus", (o.optInt("bonus") + focusedMinutes / 5).coerceAtMost(MAX_BONUS))
+        saveToday(o)
+    }
+
+    /** Spend earned minutes on a budget without using an extension. */
+    fun spendBonus(key: String, minutes: Int) {
+        val o = today()
+        val have = o.optInt("bonus")
+        val use = minutes.coerceAtMost(have)
+        if (use <= 0) return
+        o.put("bonus", have - use)
+        val extMin = obj(o, "extMin")
+        extMin.put(key, extMin.optInt(key) + use)
+        saveToday(o)
+    }
+
+    const val MAX_BONUS = 20
+
+    // ------------------------------------------------------------ buddy
+
+    var buddyOn: Boolean
+        get() = prefs.getBoolean("buddyOn", true)
+        set(v) = edit { putBoolean("buddyOn", v) }
+
+    /** Empty = use the build default. */
+    var buddyNumber: String
+        get() = prefs.getString("buddyNumber", "") ?: ""
+        set(v) = edit { putString("buddyNumber", v) }
+
+    // ------------------------------------------------------------ grayscale / wind-down
+
+    var grayscaleOn: Boolean
+        get() = prefs.getBoolean("grayscale", false)
+        set(v) = edit { putBoolean("grayscale", v) }
+
+    var windDownOn: Boolean
+        get() = prefs.getBoolean("windDown", true)
+        set(v) = edit { putBoolean("windDown", v) }
+
+    /** Minute of day for the wind-down reminder. */
+    var bedtime: Int
+        get() = prefs.getInt("bedtime", 23 * 60)
+        set(v) = edit { putInt("bedtime", v) }
+
+    var windDownLastShown: Long
+        get() = prefs.getLong("windDownShown", 0)
+        set(v) = prefs.edit().putLong("windDownShown", v).apply()
+
+    /** Raw access for small helpers (grayscale state) that should not trigger recomposition. */
+    internal fun rawPrefs(): SharedPreferences = raw
 
     /** User chose to close an app at a gate. */
     fun recordReclaim() {
@@ -429,8 +609,18 @@ object Store {
             if (completed) putInt("focusSessions", prefs.getInt("focusSessions", 0) + 1)
             else putInt("focusAbandoned", prefs.getInt("focusAbandoned", 0) + 1)
             putLong("focusLastDone", if (completed) s.endsAt else prefs.getLong("focusLastDone", 0))
+            if (completed) putInt("focusLastEarned", (minutes / 5).coerceAtMost(MAX_BONUS))
         }
+        if (completed) earnBonus(minutes)
     }
+
+    /** Minutes earned by the last completed session (for the "+5 min earned" message). */
+    fun focusLastEarned(): Int = prefs.getInt("focusLastEarned", 0)
+
+    /** Besides limited apps, focus also blocks Google search and Chrome. */
+    val focusAlsoBlocks = setOf("com.google.android.googlequicksearchbox", "com.android.chrome")
+
+    fun blockedInFocus(pkg: String): Boolean = pkg in focusAlsoBlocks || isLimited(pkg)
 
     fun focusSessionsCompleted(): Int = prefs.getInt("focusSessions", 0)
     fun focusMinutesTotal(): Int = prefs.getInt("focusMinutesTotal", 0)

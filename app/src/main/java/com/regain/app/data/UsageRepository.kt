@@ -49,8 +49,11 @@ class UsageRepository(private val context: Context) {
     }
 
     /** Foreground time today for one package; cheap enough to call on app switch. */
-    fun usedToday(pkg: String, now: Long = System.currentTimeMillis()): Long =
-        compute(TimeUtil.startOfDay(now), now, onlyPkg = pkg).firstOrNull()?.apps?.firstOrNull()?.timeMs ?: 0
+    fun usedToday(pkg: String, now: Long = System.currentTimeMillis()): Long = usedToday(setOf(pkg), now)
+
+    /** Combined foreground time today across [pkgs] (for group budgets). */
+    fun usedToday(pkgs: Set<String>, now: Long = System.currentTimeMillis()): Long =
+        compute(TimeUtil.startOfDay(now), now, onlyPkgs = pkgs).firstOrNull()?.apps?.sumOf { it.timeMs } ?: 0
 
     fun today(now: Long = System.currentTimeMillis()): DayUsage =
         compute(TimeUtil.startOfDay(now), now).first()
@@ -66,7 +69,7 @@ class UsageRepository(private val context: Context) {
      * One pass over the event log. Sessions are split across midnight so each
      * day gets exactly its own share.
      */
-    private fun compute(start: Long, end: Long, onlyPkg: String? = null): List<DayUsage> {
+    private fun compute(start: Long, end: Long, onlyPkgs: Set<String>? = null): List<DayUsage> {
         // Day boundaries.
         val dayStarts = mutableListOf<Long>()
         var d = TimeUtil.startOfDay(start)
@@ -113,8 +116,8 @@ class UsageRepository(private val context: Context) {
             val pkg = e.packageName ?: continue
             when (e.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> {
-                    if (onlyPkg != null && pkg != onlyPkg) continue
-                    if (onlyPkg == null && !counts(pkg)) continue
+                    if (onlyPkgs != null && pkg !in onlyPkgs) continue
+                    if (onlyPkgs == null && !counts(pkg)) continue
                     val set = resumed.getOrPut(pkg) { HashSet() }
                     if (set.isEmpty()) {
                         since[pkg] = t

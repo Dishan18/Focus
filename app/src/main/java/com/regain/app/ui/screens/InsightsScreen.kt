@@ -31,6 +31,9 @@ import com.regain.app.data.Store
 import com.regain.app.ui.components.AppIcon
 import com.regain.app.ui.components.Card
 import com.regain.app.ui.components.Hairline
+import com.regain.app.ui.components.IconTile
+import com.regain.app.ui.components.ListRow
+import com.regain.app.ui.components.RIcons
 import com.regain.app.ui.components.LargeTitleScreen
 import com.regain.app.ui.components.ProgressBar
 import com.regain.app.ui.components.RText
@@ -44,7 +47,7 @@ import java.util.Calendar
 private val reasonColors = listOf(RColors.Coral, RColors.Amber, RColors.Mint, RColors.Blue, RColors.Pink)
 
 @Composable
-fun InsightsScreen() {
+fun InsightsScreen(onOpenRecap: () -> Unit) {
     val week = rememberWeek()
     val catalog = RegainApp.instance.catalog
 
@@ -66,6 +69,19 @@ fun InsightsScreen() {
                 RText(TimeUtil.formatDuration(avg), style = RTheme.type.title1)
                 Spacer(Modifier.height(16.dp))
                 WeekChart(totals, Store.dailyGoalMin * TimeUtil.MINUTE, week.days.map { it.dayStart })
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+            Section {
+                ListRow(
+                    "Play your week in review",
+                    titleColor = RColors.Accent,
+                    leading = { IconTile(RIcons.Sparkle, RColors.Pink) },
+                    showChevron = true,
+                    onClick = onOpenRecap,
+                )
             }
         }
 

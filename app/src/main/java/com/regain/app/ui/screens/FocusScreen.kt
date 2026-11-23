@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.regain.app.core.Buddy
 import com.regain.app.core.Haptics
 import com.regain.app.core.TimeUtil
 import com.regain.app.data.Store
@@ -148,7 +149,7 @@ private fun IdleFocus(justFinished: Boolean, onStart: (Int, Boolean) -> Unit) {
                     RText("$m:00", style = RTheme.type.display.copy(fontWeight = FontWeight.ExtraLight))
                 }
                 RText(
-                    if (justFinished) "Session complete. Well done." else "minutes of calm",
+                    if (justFinished) "Done · +${Store.focusLastEarned()} min earned" else "minutes of calm",
                     style = RTheme.type.footnote, color = if (justFinished) RColors.Mint else RColors.Secondary,
                 )
             }
@@ -182,9 +183,15 @@ private fun IdleFocus(justFinished: Boolean, onStart: (Int, Boolean) -> Unit) {
         }
         Spacer(Modifier.height(10.dp))
         val sessions = Store.focusSessionsCompleted()
+        val bank = Store.bonusMinutes()
+        RText(
+            if (bank > 0) "$bank earned minutes to spend on a limited app today"
+            else "Every 5 minutes of focus earns 1 minute of scroll time",
+            style = RTheme.type.footnote, color = if (bank > 0) RColors.Mint else RColors.Tertiary,
+        )
         if (sessions > 0) {
             RText(
-                "$sessions sessions · ${TimeUtil.formatDuration(Store.focusMinutesTotal() * TimeUtil.MINUTE)} focused so far",
+                "$sessions session${if (sessions == 1) "" else "s"} · ${TimeUtil.formatDuration(Store.focusMinutesTotal() * TimeUtil.MINUTE)} focused so far",
                 style = RTheme.type.footnote, color = RColors.Secondary,
             )
         }
@@ -233,9 +240,12 @@ private fun RunningFocus(session: Store.FocusSession, now: Long) {
                 RText("Strict session · no early exit", style = RTheme.type.footnote, color = RColors.Secondary)
             }
         } else {
+            val ctx = LocalContext.current
             HoldToEnd {
+                val left = TimeUtil.formatDuration(session.remaining())
                 Store.endFocusEarly()
                 Haptics.play(Haptics.Kind.Sad)
+                Buddy.notify(ctx, "ended a focus session early ($left left).")
             }
         }
         Spacer(Modifier.height(10.dp))

@@ -76,6 +76,17 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         com.regain.app.service.GuardService.ownUiResumed()
     }
+
+    override fun onPause() {
+        super.onPause()
+        com.regain.app.service.GuardService.ownUiPaused()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Limits or usage may have changed: refresh the home-screen widget.
+        com.regain.app.widget.FocusWidget.requestUpdate(this)
+    }
 }
 
 private data class Tab(val title: String, val icon: ImageVector)
@@ -109,6 +120,7 @@ private fun Root() {
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var recapOpen by rememberSaveable { mutableStateOf(false) }
 
     BackHandler(enabled = settingsOpen) { settingsOpen = false }
     BackHandler(enabled = !settingsOpen && tab != 0) { tab = 0 }
@@ -139,10 +151,10 @@ private fun Root() {
                         label = "tab",
                     ) { t ->
                         when (t) {
-                            0 -> TodayScreen(onOpenSettings = { settingsOpen = true }, onOpenLimits = { tab = 1 })
+                            0 -> TodayScreen(onOpenSettings = { settingsOpen = true }, onOpenLimits = { tab = 1 }, onOpenRecap = { recapOpen = true })
                             1 -> LimitsScreen()
                             2 -> FocusScreen()
-                            else -> InsightsScreen()
+                            else -> InsightsScreen(onOpenRecap = { recapOpen = true })
                         }
                     }
                     val hidden by hideTabs
@@ -156,13 +168,20 @@ private fun Root() {
                 }
             }
         }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = recapOpen,
+            enter = fadeIn(tween(300)) + androidx.compose.animation.scaleIn(initialScale = 0.94f),
+            exit = fadeOut(tween(250)),
+        ) {
+            com.regain.app.ui.screens.RecapScreen(onClose = { recapOpen = false })
+        }
     }
     }
 }
 
 @Composable
 private fun TabBar(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth().background(Color(0xF00C0C0E))) {
+    Column(modifier.fillMaxWidth().background(Color(0xFA0C0C0E))) {
         Hairline(0.dp)
         Row(
             Modifier

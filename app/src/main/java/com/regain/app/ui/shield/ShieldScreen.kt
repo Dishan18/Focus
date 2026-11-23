@@ -53,10 +53,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.regain.app.RegainApp
+import com.regain.app.core.Buddy
 import com.regain.app.core.Haptics
 import com.regain.app.core.TimeUtil
 import com.regain.app.data.Store
@@ -83,8 +85,11 @@ private enum class Stage { Main, Extend, Challenge, Emergency, Reward }
 private val rewardBrush = Brush.horizontalGradient(listOf(Color(0xFF34E0A1), Color(0xFF1FB5C9)))
 
 @Composable
-fun ShieldScreen(mode: ShieldMode, pkg: String, session: Int, actions: ShieldActions) {
+fun ShieldScreen(mode: ShieldMode, pkg: String, budgetKey: String, session: Int, actions: ShieldActions) {
     val label = remember(pkg) { RegainApp.instance.catalog.label(pkg) }
+    val ctx = LocalContext.current
+    // For a group budget, talk about the group ("Social"), not the single app.
+    val budgetLabel = remember(budgetKey, session) { Store.budget(budgetKey)?.label ?: label }
     var stage by remember(session) { mutableStateOf(Stage.Main) }
     var extendMinutes by remember(session) { mutableIntStateOf(15) }
     val night = remember(session) { Store.isNight() }
@@ -130,9 +135,9 @@ fun ShieldScreen(mode: ShieldMode, pkg: String, session: Int, actions: ShieldAct
                         Stage.Reward -> RewardStage()
                         Stage.Challenge -> {
                             Spacer(Modifier.height(36.dp))
-                            val level = Store.extensionsUsed(pkg) + 1 + if (night) 1 else 0
+                            val level = Store.extensionsUsed(budgetKey) + 1 + if (night) 1 else 0
                             val solved = {
-                                Store.addExtension(pkg, extendMinutes)
+                                Store.addExtension(budgetKey, extendMinutes)
                                 actions.allow()
                             }
                             if (Store.challengeType == 1) {
@@ -150,15 +155,21 @@ fun ShieldScreen(mode: ShieldMode, pkg: String, session: Int, actions: ShieldAct
                         )
                         Stage.Emergency -> EmergencyStage(
                             onDone = {
-                                Store.useEmergency(pkg)
+                                Store.useEmergency(budgetKey)
+                                Buddy.notify(ctx, "emergency unlock used for $budgetLabel (+${Store.EMERGENCY_MINUTES} min).")
                                 actions.allow()
                             },
                             onQuit = { stage = Stage.Reward },
                         )
                         Stage.Main -> when (mode) {
                             ShieldMode.TimesUp -> TimesUpStage(
-                                pkg, label,
+                                pkg, budgetKey, label, budgetLabel,
                                 onClose = { stage = Stage.Reward },
+                                onSpendBonus = { minutes ->
+                                    Store.spendBonus(budgetKey, minutes)
+                                    Haptics.play(Haptics.Kind.Success)
+                                    actions.allow()
+                                },
                                 onExtend = { stage = Stage.Extend },
                                 onEmergency = { stage = Stage.Emergency },
                             )
@@ -222,16 +233,20 @@ private fun ColumnScope.BottomActions(content: @Composable ColumnScope.() -> Uni
 @Composable
 private fun ColumnScope.TimesUpStage(
     pkg: String,
+    key: String,
     label: String,
+    budgetLabel: String,
     onClose: () -> Unit,
+    onSpendBonus: (Int) -> Unit,
     onExtend: () -> Unit,
     onEmergency: () -> Unit,
 ) {
     LaunchedEffect(Unit) { Haptics.play(Haptics.Kind.TimesUp) }
-    val allowed = Store.allowedMinutes(pkg) ?: 0
-    val used = Store.extensionsUsed(pkg)
-    val canExtend = Store.canExtend(pkg)
+    val allowed = Store.allowedMinutes(key) ?: 0
+    val used = Store.extensionsUsed(key)
+    val canExtend = Store.canExtend(key)
     val emergency = Store.emergencyAvailable()
+    val bonus = Store.bonusMinutes().coerceAtMost(15)
 
     AppHeader(pkg, label)
     Spacer(Modifier.height(36.dp))
@@ -242,13 +257,15 @@ private fun ColumnScope.TimesUpStage(
     RText("Time's up", style = RTheme.type.largeTitle)
     Spacer(Modifier.height(8.dp))
     RText(
-        "You've used your ${TimeUtil.formatDuration(allowed * TimeUtil.MINUTE)} on $label today.",
+        "You've used your ${TimeUtil.formatDuration(allowed * TimeUtil.MINUTE)} on $budgetLabel today.",
         style = RTheme.type.body, color = RColors.Secondary, align = TextAlign.Center,
         modifier = Modifier.padding(horizontal = 40.dp),
     )
 
     BottomActions {
         PrimaryButton("Close $label", onClose, brush = rewardBrush, haptic = null)
+        // Earned in focus sessions: spend without math or an extension.
+        if (bonus > 0) GlassButton("Spend $bonus earned minutes", { onSpendBonus(bonus) })
         when {
             canExtend -> {
                 val left = Store.MAX_EXTENSIONS_PER_APP - used

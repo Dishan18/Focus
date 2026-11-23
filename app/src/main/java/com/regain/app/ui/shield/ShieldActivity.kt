@@ -23,6 +23,8 @@ class ShieldActivity : ComponentActivity() {
 
     private val mode = mutableStateOf(ShieldMode.Pause)
     private val pkg = mutableStateOf("")
+    /** Budget key: the package itself, or "g:<id>" for a group. */
+    private val key = mutableStateOf("")
     /** Bumped on every new launch so screen state starts fresh. */
     private val session = mutableStateOf(0)
 
@@ -39,6 +41,7 @@ class ShieldActivity : ComponentActivity() {
                 ShieldScreen(
                     mode = mode.value,
                     pkg = pkg.value,
+                    budgetKey = key.value,
                     session = session.value,
                     actions = actions,
                 )
@@ -54,12 +57,18 @@ class ShieldActivity : ComponentActivity() {
     private fun readIntent(i: Intent) {
         mode.value = runCatching { ShieldMode.valueOf(i.getStringExtra(EXTRA_MODE) ?: "") }.getOrDefault(ShieldMode.Pause)
         pkg.value = i.getStringExtra(EXTRA_PKG).orEmpty()
+        key.value = i.getStringExtra(EXTRA_KEY) ?: pkg.value
         session.value++
     }
 
     override fun onResume() {
         super.onResume()
         GuardService.ownUiResumed()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        GuardService.ownUiPaused()
     }
 
     override fun onStop() {
@@ -91,11 +100,13 @@ class ShieldActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_MODE = "mode"
         private const val EXTRA_PKG = "pkg"
+        private const val EXTRA_KEY = "key"
 
-        fun intent(context: Context, mode: ShieldMode, pkg: String) =
+        fun intent(context: Context, mode: ShieldMode, pkg: String, key: String = pkg) =
             Intent(context, ShieldActivity::class.java)
                 .putExtra(EXTRA_MODE, mode.name)
                 .putExtra(EXTRA_PKG, pkg)
+                .putExtra(EXTRA_KEY, key)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
     }
 }

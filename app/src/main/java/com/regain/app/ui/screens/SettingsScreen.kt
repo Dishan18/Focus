@@ -1,5 +1,31 @@
 package com.regain.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardType
+import com.regain.app.core.Buddy
+import com.regain.app.core.Grayscale
+import com.regain.app.ui.components.QuietButton
+import com.regain.app.ui.components.SectionFooter
+import com.regain.app.ui.components.TimeWheel
+import com.regain.app.ui.components.pressable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -34,8 +60,16 @@ import com.regain.app.ui.theme.RTheme
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
-    rememberRefreshKey() // re-read prefs and permission state on resume
+    val refresh = rememberRefreshKey() // re-read prefs and permission state on resume
+    val timeSheet = remember { mutableStateOf<TimeEdit?>(null) }
+    var smsGranted by remember(refresh) { mutableStateOf(Buddy.hasPermission(ctx)) }
+    val smsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        smsGranted = ok
+        if (ok) Haptics.play(Haptics.Kind.Success)
+    }
 
+    CompositionLocalProvider(LocalTimeSheet provides timeSheet) {
+    Box(Modifier.fillMaxSize()) {
     LargeTitleScreen(
         title = "Settings",
         leading = { BarButton(RIcons.Back, onBack) },
@@ -71,6 +105,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 SwitchRow("Unlock counter", Store.unlockPillOn, { Store.unlockPillOn = it },
                     subtitle = "Shows “Unlock #12 today” each time",
                     leading = { IconTile(RIcons.Phone, RColors.Green) })
+                Hairline(60.dp)
+                val grayOk = Grayscale.available(ctx)
+                SwitchRow("Drain colour", Store.grayscaleOn && grayOk, { if (grayOk) Store.grayscaleOn = it },
+                    subtitle = if (grayOk) "The screen turns gray in the last 5 minutes" else "Needs a one-time setup from a computer",
+                    leading = { IconTile(RIcons.Eye, RColors.Fill) })
+            }
+            if (!Grayscale.available(ctx)) {
+                SectionFooter("To enable colour drain, connect the phone to a computer once and run:\nadb shell pm grant ${ctx.packageName} android.permission.WRITE_SECURE_SETTINGS")
             }
         }
         item {
@@ -107,6 +149,67 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ListRow("From", trailing = { TimeStepper(Store.downtimeStart) { Store.downtimeStart = it } })
                     Hairline(16.dp)
                     ListRow("Until", trailing = { TimeStepper(Store.downtimeEnd) { Store.downtimeEnd = it } })
+                }
+                Hairline(60.dp)
+                SwitchRow("Wind-down reminder", Store.windDownOn, { Store.windDownOn = it },
+                    subtitle = "A gentle buzz at bedtime to put the phone away",
+                    leading = { IconTile(RIcons.Sparkle, RColors.Blue) })
+                if (Store.windDownOn) {
+                    Hairline(60.dp)
+                    ListRow("Bedtime", trailing = { TimeStepper(Store.bedtime) { Store.bedtime = it } })
+                }
+            }
+        }
+        item {
+            Section(header = "Weekends", footer = "Limits on Saturday and Sunday. Applies to apps and groups.") {
+                Box(Modifier.padding(16.dp)) {
+                    Segmented(listOf("Same", "1.5\u00d7", "2\u00d7"), Store.weekendMode, { Store.weekendMode = it })
+                }
+            }
+        }
+        item {
+            var number by remember { mutableStateOf(Buddy.number()) }
+            val saved = Buddy.number()
+            Section(
+                header = "Accountability buddy",
+                footer = "Your buddy gets a text when you use an emergency unlock, end focus early, or loosen or remove a limit. Changing the number tells the old one. Normal SMS charges may apply.",
+            ) {
+                SwitchRow("Text my buddy", Store.buddyOn, { Store.buddyOn = it },
+                    leading = { IconTile(RIcons.Phone, RColors.Mint) })
+                Hairline(60.dp)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RText("Number", Modifier.width(90.dp))
+                    BasicTextField(
+                        value = number,
+                        onValueChange = { v -> number = v.filter { it.isDigit() || it == '+' || it == ' ' }.take(18) },
+                        singleLine = true,
+                        textStyle = RTheme.type.body.copy(color = RColors.Label),
+                        cursorBrush = SolidColor(RColors.Accent),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            Box { if (number.isEmpty()) RText("+91…", color = RColors.Tertiary); inner() }
+                        },
+                    )
+                    val clean = number.filter { it.isDigit() || it == '+' }
+                    if (clean != saved && clean.length >= 8) {
+                        QuietButton("Save", {
+                            val old = saved
+                            Store.buddyNumber = clean
+                            if (old.isNotBlank() && old != clean) Buddy.notify(ctx, "the buddy number was changed to $clean.", to = old)
+                            Haptics.play(Haptics.Kind.Success)
+                        }, color = RColors.Accent)
+                    }
+                }
+                Hairline(16.dp)
+                if (!smsGranted) {
+                    ListRow("Allow sending texts", titleColor = RColors.Accent, showChevron = true,
+                        onClick = { smsLauncher.launch(android.Manifest.permission.SEND_SMS) })
+                } else {
+                    ListRow("Send a test text", titleColor = RColors.Accent, onClick = {
+                        Buddy.notify(ctx, "this is a test from the Focus app. You're the accountability buddy.")
+                        Haptics.play(Haptics.Kind.Success)
+                    })
                 }
             }
         }
@@ -161,6 +264,37 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(20.dp))
         }
     }
+
+    TimeSheet(timeSheet)
+    }
+    }
+}
+
+/** A time row being edited in the wheel sheet. */
+class TimeEdit(val minute: Int, val onChange: (Int) -> Unit)
+
+private val LocalTimeSheet = staticCompositionLocalOf<MutableState<TimeEdit?>> { mutableStateOf(null) }
+
+@Composable
+private fun TimeSheet(state: MutableState<TimeEdit?>) {
+    val edit = state.value
+    var last by remember { mutableStateOf<TimeEdit?>(null) }
+    if (edit != null) last = edit
+    var picked by remember(edit) { mutableIntStateOf(edit?.minute ?: 0) }
+    Sheet(edit != null, onDismiss = { state.value = null }) {
+        val e = last ?: return@Sheet
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            QuietButton("Cancel", { state.value = null }, color = RColors.Accent)
+            Spacer(Modifier.weight(1f))
+            QuietButton("Done", {
+                e.onChange(picked)
+                Haptics.play(Haptics.Kind.Success)
+                state.value = null
+            }, color = RColors.Accent)
+        }
+        key(e) { TimeWheel(e.minute) { picked = it } }
+        Spacer(Modifier.height(24.dp))
+    }
 }
 
 @Composable
@@ -178,9 +312,11 @@ private fun StatusRow(title: String, ok: Boolean, onFix: () -> Unit) {
 
 @Composable
 private fun TimeStepper(minute: Int, onChange: (Int) -> Unit) {
-    Stepper(
-        TimeUtil.formatMinuteOfDay(minute),
-        onMinus = { onChange((minute - 30 + 1440) % 1440) },
-        onPlus = { onChange((minute + 30) % 1440) },
-    )
+    val sheet = LocalTimeSheet.current
+    Box(
+        Modifier
+            .pressable { sheet.value = TimeEdit(minute, onChange) }
+            .background(Color(0x3D767680), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) { RText(TimeUtil.formatMinuteOfDay(minute), style = RTheme.type.body) }
 }

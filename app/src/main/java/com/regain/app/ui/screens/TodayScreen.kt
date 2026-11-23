@@ -39,7 +39,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun TodayScreen(onOpenSettings: () -> Unit, onOpenLimits: () -> Unit) {
+fun TodayScreen(onOpenSettings: () -> Unit, onOpenLimits: () -> Unit, onOpenRecap: () -> Unit) {
     val week = rememberWeek()
     val today = week?.today
     val total = today?.totalMs ?: 0
@@ -58,7 +58,7 @@ fun TodayScreen(onOpenSettings: () -> Unit, onOpenLimits: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Card {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Bloom(health, petals = streak + 3, modifier = Modifier.size(210.dp))
+                    Bloom(health, petals = streak + 3, modifier = Modifier.size(210.dp), wilted = today != null && total > goalMs)
                 }
                 Spacer(Modifier.height(8.dp))
                 RText(
@@ -81,7 +81,7 @@ fun TodayScreen(onOpenSettings: () -> Unit, onOpenLimits: () -> Unit) {
                     Spacer(Modifier.width(6.dp))
                     RText(
                         when (streak) {
-                            0 -> "Over your goal today. Tomorrow's a fresh bloom."
+                            0 -> "Your Bloom is wilting. It recovers tomorrow."
                             1 -> "On track today"
                             else -> "$streak-day streak under your goal"
                         },
@@ -97,6 +97,25 @@ fun TodayScreen(onOpenSettings: () -> Unit, onOpenLimits: () -> Unit) {
                 StatTile("Unlocks", "${maxOf(Store.unlocksToday(), today?.unlocks ?: 0)}", Modifier.weight(1f))
                 StatTile("Closed", "${Store.reclaimsToday()}", Modifier.weight(1f), accent = RColors.Mint)
                 StatTile("Extensions", "${Store.extensionsUsedTotal()}/${Store.MAX_EXTENSIONS_PER_DAY}", Modifier.weight(1f), accent = RColors.Amber)
+            }
+        }
+
+        // Weekly recap: offered on Sundays and Mondays.
+        val dow = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)
+        if (dow == java.util.Calendar.SUNDAY || dow == java.util.Calendar.MONDAY) {
+            item {
+                Spacer(Modifier.height(12.dp))
+                Card(Modifier.pressable(pressedScale = 0.98f, onClick = onOpenRecap)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RIcon(RIcons.Sparkle, tint = RColors.Pink, size = 26.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            RText("Your week in review", style = RTheme.type.headline)
+                            RText("Tap to play", style = RTheme.type.footnote, color = RColors.Secondary)
+                        }
+                        RIcon(RIcons.Chevron, tint = RColors.Tertiary, size = 18.dp)
+                    }
+                }
             }
         }
 

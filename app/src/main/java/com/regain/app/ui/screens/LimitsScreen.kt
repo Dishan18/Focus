@@ -34,10 +34,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.regain.app.RegainApp
+import com.regain.app.core.Buddy
 import com.regain.app.core.Haptics
 import com.regain.app.core.TimeUtil
 import com.regain.app.data.AppCatalog
@@ -48,6 +50,7 @@ import com.regain.app.ui.components.BarButton
 import com.regain.app.ui.components.Card
 import com.regain.app.ui.components.Chip
 import com.regain.app.ui.components.Hairline
+import com.regain.app.ui.components.ListRow
 import com.regain.app.ui.components.LargeTitleScreen
 import com.regain.app.ui.components.PrimaryButton
 import com.regain.app.ui.components.ProgressBar
@@ -69,6 +72,8 @@ fun LimitsScreen() {
     val limits = run { rememberRefreshKey(); Store.limits() }
     var picker by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<String?>(null) }
+    val groups = run { rememberRefreshKey(); Store.groups() }
+    var editingGroup by remember { mutableStateOf<String?>(null) } // group id, "new", or null
 
     val apps by produceState<List<AppCatalog.AppInfo>>(emptyList()) {
         value = withContext(Dispatchers.IO) { catalog.launchableApps() }
@@ -83,7 +88,7 @@ fun LimitsScreen() {
             title = "Limits",
             trailing = { BarButton(RIcons.Plus, { picker = true }) },
         ) {
-            if (limits.isEmpty()) {
+            if (limits.isEmpty() && groups.isEmpty()) {
                 item {
                     Spacer(Modifier.height(8.dp))
                     Card {
@@ -99,7 +104,7 @@ fun LimitsScreen() {
                         PrimaryButton("Add a limit", { picker = true })
                     }
                 }
-            } else {
+            } else if (limits.isNotEmpty()) {
                 item {
                     Section(
                         header = "Daily limits",
@@ -109,9 +114,30 @@ fun LimitsScreen() {
                             if (i > 0) Hairline(62.dp)
                             val used = week?.today?.timeOf(pkg) ?: 0
                             val allowed = (Store.allowedMinutes(pkg) ?: min) * TimeUtil.MINUTE
-                            LimitRow(pkg, catalog.label(pkg), used, allowed, min) { editing = pkg }
+                            LimitRow(pkg, catalog.label(pkg), used, allowed, Store.scaled(min)) { editing = pkg }
                         }
                     }
+                }
+            }
+
+            item {
+                Section(
+                    header = "Groups",
+                    footer = "A group shares one daily budget across several apps, like \u201cSocial \u00b7 1h\u201d for all of them together.",
+                ) {
+                    groups.values.sortedBy { it.name.lowercase() }.forEachIndexed { i, g ->
+                        if (i > 0) Hairline(62.dp)
+                        val used = week?.today?.let { d -> g.pkgs.sumOf { d.timeOf(it) } } ?: 0
+                        val allowed = (Store.allowedMinutes("g:${g.id}") ?: g.minutes) * TimeUtil.MINUTE
+                        GroupRow(g, used, allowed) { editingGroup = g.id }
+                    }
+                    if (groups.isNotEmpty()) Hairline(16.dp)
+                    ListRow(
+                        "New group",
+                        titleColor = RColors.Accent,
+                        leading = { RIcon(RIcons.Plus, tint = RColors.Accent, size = 22.dp) },
+                        onClick = { editingGroup = "new" },
+                    )
                 }
             }
 
@@ -157,6 +183,11 @@ fun LimitsScreen() {
         LimitEditorSheet(
             pkg = editing,
             onDismiss = { editing = null },
+        )
+        GroupEditorSheet(
+            groupId = editingGroup,
+            apps = apps,
+            onDismiss = { editingGroup = null },
         )
     }
 }
@@ -269,6 +300,7 @@ private fun LimitEditorSheet(pkg: String?, onDismiss: () -> Unit) {
     val existing = remember(pkg) { pkg?.let { Store.limits()[it] } }
     var minutes by remember(pkg) { mutableIntStateOf(existing ?: 30) }
 
+    val ctx = LocalContext.current
     Sheet(pkg != null, onDismiss) {
         val p = lastPkg
         if (p.isEmpty()) return@Sheet
@@ -319,7 +351,8 @@ private fun LimitEditorSheet(pkg: String?, onDismiss: () -> Unit) {
             )
             Spacer(Modifier.height(14.dp))
             PrimaryButton(if (existing == null) "Set limit" else "Save", {
-                Store.setLimit(p, minutes)
+                val appliedNow = Store.setLimit(p, minutes)
+                if (!appliedNow) Buddy.notify(ctx, "raised the ${RegainApp.instance.catalog.label(p)} limit to ${TimeUtil.formatDuration(minutes * TimeUtil.MINUTE)} (from tomorrow).")
                 GuardService.refresh()
                 onDismiss()
             }, haptic = Haptics.Kind.Success)
@@ -333,6 +366,7 @@ private fun LimitEditorSheet(pkg: String?, onDismiss: () -> Unit) {
                 } else {
                     QuietButton("Remove limit (from tomorrow)", {
                         Store.removeLimit(p)
+                        Buddy.notify(ctx, "removed the ${RegainApp.instance.catalog.label(p)} limit (from tomorrow).")
                         onDismiss()
                     }, color = RColors.Coral)
                 }
@@ -351,4 +385,168 @@ private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 18.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) { RText(symbol, style = RTheme.type.title2, color = if (enabled) RColors.Label else RColors.Tertiary) }
+}
+
+
+@Composable
+private fun GroupRow(g: Store.Group, used: Long, allowed: Long, onClick: () -> Unit) {
+    val f = used.toFloat() / allowed.coerceAtLeast(1)
+    val left = allowed - used
+    val pending = Store.pendingGroups().containsKey(g.id)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressable(pressedScale = 0.985f, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Up to three overlapping icons.
+        Box(Modifier.width(34.dp).height(34.dp)) {
+            g.pkgs.take(3).forEachIndexed { i, pkg ->
+                AppIcon(pkg, 22.dp, Modifier.padding(start = (i * 6).dp, top = (i * 6).dp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RText(g.name, Modifier.weight(1f), maxLines = 1)
+                RText(
+                    if (left <= 0) "Done for today" else "${TimeUtil.formatDuration(left)} left",
+                    style = RTheme.type.subhead,
+                    color = if (left <= 0) RColors.Coral else RColors.Secondary,
+                )
+            }
+            Spacer(Modifier.height(7.dp))
+            ProgressBar(f, if (f >= 1f) RColors.Coral else if (f > 0.8f) RColors.Amber else RColors.Teal, height = 5.dp)
+            Spacer(Modifier.height(5.dp))
+            RText(
+                "${g.pkgs.size} apps · ${TimeUtil.formatDuration(used)} of ${TimeUtil.formatDuration(Store.scaled(g.minutes) * TimeUtil.MINUTE)}" +
+                    if (pending) " · changes tomorrow" else "",
+                style = RTheme.type.footnote, color = RColors.Tertiary,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        RIcon(RIcons.Chevron, tint = RColors.Tertiary, size = 18.dp)
+    }
+}
+
+@Composable
+private fun GroupEditorSheet(groupId: String?, apps: List<AppCatalog.AppInfo>, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val existing = remember(groupId) { groupId?.let { Store.groups()[it] } }
+    var name by remember(groupId) { mutableStateOf(existing?.name ?: "Social") }
+    var minutes by remember(groupId) { mutableIntStateOf(existing?.minutes ?: 60) }
+    var selected by remember(groupId) { mutableStateOf(existing?.pkgs ?: emptySet()) }
+    var query by remember(groupId) { mutableStateOf("") }
+    val canSave = selected.isNotEmpty() && name.isNotBlank()
+
+    Sheet(groupId != null, onDismiss, fullHeight = true) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            QuietButton("Cancel", onDismiss, color = RColors.Accent)
+            Spacer(Modifier.weight(1f))
+            RText(if (existing == null) "New group" else "Edit group", style = RTheme.type.headline)
+            Spacer(Modifier.weight(1f))
+            QuietButton("Save", {
+                if (canSave) {
+                    val g = Store.Group(existing?.id ?: Store.newGroupId(), name.trim(), minutes, selected)
+                    val now = Store.saveGroup(g)
+                    if (!now) Buddy.notify(ctx, "loosened the “${g.name}” group limit (from tomorrow).")
+                    Haptics.play(Haptics.Kind.Success)
+                    GuardService.refresh()
+                    onDismiss()
+                }
+            }, color = if (canSave) RColors.Accent else RColors.Tertiary)
+        }
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            BasicTextField(
+                value = name,
+                onValueChange = { if (it.length <= 24) name = it },
+                singleLine = true,
+                textStyle = RTheme.type.title3.copy(color = RColors.Label),
+                cursorBrush = SolidColor(RColors.Accent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x3D767680), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RText("Shared daily limit", Modifier.weight(1f))
+                StepButton("−", enabled = minutes > 5) { minutes = (minutes - 5).coerceAtLeast(5) }
+                RText(
+                    TimeUtil.formatDuration(minutes * TimeUtil.MINUTE),
+                    style = RTheme.type.headline, align = TextAlign.Center, modifier = Modifier.width(84.dp),
+                )
+                StepButton("+", enabled = minutes < 600) { minutes = (minutes + 5).coerceAtMost(600) }
+            }
+            Spacer(Modifier.height(10.dp))
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                textStyle = RTheme.type.body.copy(color = RColors.Label),
+                cursorBrush = SolidColor(RColors.Accent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x3D767680), RoundedCornerShape(11.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                decorationBox = { inner ->
+                    Box {
+                        if (query.isEmpty()) RText("Search apps", color = RColors.Tertiary)
+                        inner()
+                    }
+                },
+            )
+            RText(
+                "${selected.size} selected" + if (existing != null) " · loosening applies tomorrow" else "",
+                style = RTheme.type.footnote, color = RColors.Secondary, modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+            )
+        }
+        val filtered = remember(apps, query) {
+            apps.filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
+                .sortedByDescending { it.pkg in (existing?.pkgs ?: emptySet()) }
+        }
+        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+            items(filtered, key = { it.pkg }) { app ->
+                val on = app.pkg in selected
+                Column {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .pressable(pressedScale = 0.985f) { selected = if (on) selected - app.pkg else selected + app.pkg }
+                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AppIcon(app.pkg, 34.dp)
+                        Spacer(Modifier.width(14.dp))
+                        RText(app.label, Modifier.weight(1f), maxLines = 1)
+                        Box(
+                            Modifier
+                                .width(24.dp).height(24.dp)
+                                .background(if (on) RColors.Accent else Color(0x26FFFFFF), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) { if (on) RIcon(RIcons.Check, size = 16.dp) }
+                    }
+                    Hairline(68.dp)
+                }
+            }
+        }
+        if (existing != null) {
+            val pending = Store.pendingGroups().containsKey(existing.id)
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                if (pending) {
+                    QuietButton("Keep the current group", {
+                        Store.cancelPendingGroup(existing.id)
+                        onDismiss()
+                    }, color = RColors.Accent)
+                } else {
+                    QuietButton("Delete group (from tomorrow)", {
+                        Store.deleteGroup(existing.id)
+                        Buddy.notify(ctx, "deleted the “${existing.name}” group limit (from tomorrow).")
+                        onDismiss()
+                    }, color = RColors.Coral)
+                }
+            }
+        }
+    }
 }

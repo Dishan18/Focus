@@ -6,7 +6,11 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import com.regain.app.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -49,7 +53,17 @@ data class RType(
     val display: TextStyle,
 )
 
-private val family = FontFamily.Default
+/** Inter (variable font, SIL OFL) for a crisp, iOS-like feel. */
+@OptIn(ExperimentalTextApi::class)
+private fun inter(weight: Int) = Font(
+    R.font.inter,
+    weight = FontWeight(weight),
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
+)
+
+private val family = FontFamily(
+    inter(100), inter(200), inter(300), inter(400), inter(500), inter(600), inter(700),
+)
 
 val DefaultType = RType(
     largeTitle = TextStyle(fontFamily = family, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 41.sp, letterSpacing = (-0.012).em),

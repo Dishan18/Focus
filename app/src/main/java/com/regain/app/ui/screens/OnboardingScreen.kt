@@ -42,6 +42,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.regain.app.core.Buddy
 import com.regain.app.core.Haptics
 import com.regain.app.core.Permissions
 import com.regain.app.ui.components.Aurora
@@ -56,7 +59,7 @@ import com.regain.app.ui.components.RText
 import com.regain.app.ui.theme.RColors
 import com.regain.app.ui.theme.RTheme
 
-private const val STEPS = 5
+private const val STEPS = 6
 
 @Composable
 fun OnboardingScreen(onDone: () -> Unit, returning: Boolean) {
@@ -134,6 +137,7 @@ fun OnboardingScreen(onDone: () -> Unit, returning: Boolean) {
                             onAppInfo = { Permissions.launch(ctx, Permissions.appDetailsIntent(ctx)) },
                             onNext = { go(4) },
                         )
+                        4 -> BuddyStep(onNext = { go(5) })
                         else -> Done(canFinish = usage && access, onFinish = onDone, onBack = { go(if (!usage) 1 else 2) })
                     }
                 }
@@ -205,7 +209,7 @@ private fun ColumnScope.AccessibilityStep(granted: Boolean, onGrant: () -> Unit,
             "Says “Restricted setting”?",
             listOf(
                 "Android blocks this for apps installed from outside the Play Store.",
-                "Tap Open App info below, then ⋮ in the top-right corner.",
+                "Tap Open App info below, then the three-dot menu in the top-right corner.",
                 "Choose “Allow restricted settings” and confirm.",
                 "Come back here and tap Turn on again.",
             ),
@@ -237,7 +241,7 @@ private fun ColumnScope.BatteryStep(unrestricted: Boolean, onBattery: () -> Unit
         "On Realme",
         listOf(
             "Open App info → Battery → turn on “Allow background activity”.",
-            "Open Recents, swipe down on Focus's card (or tap ⋮) and choose Lock.",
+            "Open Recents, swipe down on Focus's card (or use its three-dot menu) and choose Lock.",
         ),
     )
     Spacer(Modifier.weight(1f))
@@ -286,4 +290,30 @@ private fun Instructions(title: String, lines: List<String>) {
             }
         }
     }
+}
+
+
+@Composable
+private fun ColumnScope.BuddyStep(onNext: () -> Unit) {
+    val ctx = LocalContext.current
+    var granted by remember { mutableStateOf(Buddy.hasPermission(ctx)) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        granted = ok
+        if (ok) Haptics.play(Haptics.Kind.Success)
+    }
+    StepHeader(
+        RIcons.Phone,
+        "Your accountability buddy",
+        "If you use an emergency unlock, end focus early, or loosen a limit, Focus sends one short text to your buddy. Nothing else is ever sent.",
+        granted,
+    )
+    Spacer(Modifier.weight(1f))
+    if (granted) {
+        PrimaryButton("Continue", onNext, haptic = Haptics.Kind.Success)
+    } else {
+        PrimaryButton("Allow sending texts", { launcher.launch(android.Manifest.permission.SEND_SMS) })
+        Spacer(Modifier.height(4.dp))
+        QuietButton("Skip for now", onNext, color = RColors.Label)
+    }
+    Spacer(Modifier.height(20.dp))
 }

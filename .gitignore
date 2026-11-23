@@ -13,3 +13,4 @@ captures/
 keystore.properties
 dist/
 *.apk
+buddy.properties

@@ -102,39 +102,44 @@ fun Aurora(
  * "Bloom": the living mark. A soft organic flower whose petal count follows the
  * streak and whose fullness follows how well today is going (health 0..1).
  */
+/** [wilted]: over the daily goal. Petals sag and lose colour, then recover tomorrow. */
 @Composable
-fun Bloom(health: Float, petals: Int, modifier: Modifier = Modifier) {
+fun Bloom(health: Float, petals: Int, modifier: Modifier = Modifier, wilted: Boolean = false) {
     val h by animateFloatAsState(health.coerceIn(0f, 1f), spring(dampingRatio = 0.7f, stiffness = 40f), label = "health")
     val transition = rememberInfiniteTransition(label = "bloom")
     val spin by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(60_000, easing = LinearEasing)), label = "spin")
     val breathe by transition.animateFloat(
         0.96f, 1.04f, infiniteRepeatable(tween(4200), RepeatMode.Reverse), label = "breathe",
     )
-    val warm = lerp(RColors.Amber, RColors.Mint, h)
-    val cool = lerp(RColors.Coral, RColors.Accent, h)
+    val wilt by animateFloatAsState(if (wilted) 1f else 0f, tween(1400), label = "wilt")
+    val warm = lerp(lerp(RColors.Amber, RColors.Mint, h), Color(0xFF9C8A6E), wilt)
+    val cool = lerp(lerp(RColors.Coral, RColors.Accent, h), Color(0xFF6B6470), wilt)
 
     Canvas(modifier) {
         val cx = size.width / 2
         val cy = size.height / 2
         val maxR = min(size.width, size.height) / 2
-        val base = maxR * (0.48f + 0.26f * h) * breathe
-        val amp = 0.05f + 0.16f * h
+        val base = maxR * (0.48f + 0.26f * h - 0.06f * wilt) * breathe
+        val amp = (0.05f + 0.16f * h) * (1f - 0.6f * wilt)
+        val droop = base * 0.14f * wilt
         val n = petals.coerceIn(3, 12)
 
         drawCircle(
             Brush.radialGradient(listOf(warm.copy(alpha = 0.35f * (0.4f + h)), Color.Transparent), Offset(cx, cy), maxR),
             radius = maxR, center = Offset(cx, cy),
         )
-        rotate(spin, Offset(cx, cy)) {
+        // Spin by shifting the petal phase, so a wilted droop stays at the bottom.
+        val phase = spin / 180f * PI.toFloat()
+        run {
             for (layer in 0..2) {
                 val scale = 1f - layer * 0.22f
                 val path = Path()
                 val steps = 180
                 for (i in 0..steps) {
                     val th = (i.toFloat() / steps) * 2f * PI.toFloat()
-                    val rr = base * scale * (1f + amp * sin(n * th + layer * 0.9f))
+                    val rr = base * scale * (1f + amp * sin(n * (th - phase) + layer * 0.9f))
                     val x = cx + rr * cos(th)
-                    val y = cy + rr * sin(th)
+                    val y = cy + rr * sin(th) + droop * ((sin(th) + 1f) / 2f)
                     if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 }
                 path.close()

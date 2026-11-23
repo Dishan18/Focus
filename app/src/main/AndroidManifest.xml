@@ -7,6 +7,12 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Accountability buddy texts (optional, asked at runtime). -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <!-- Optional grayscale fade; only works if granted once over adb. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- See launchable apps without QUERY_ALL_PACKAGES. -->
     <queries>
@@ -53,6 +59,18 @@
             android:noHistory="false"
             android:theme="@style/Theme.Regain.Shield"
             android:windowSoftInputMode="adjustResize" />
+
+        <receiver
+            android:name=".widget.FocusWidget"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/focus_widget_info" />
+        </receiver>
 
         <service
             android:name=".service.GuardService"

@@ -21,8 +21,18 @@ android {
         applicationId = "com.regain.app"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+
+        // Default accountability-buddy number. Kept out of the public repo:
+        // set BUDDY_PHONE as an env var / CI secret, or in buddy.properties.
+        val buddyProps = Properties().apply {
+            val f = rootProject.file("buddy.properties")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+        val buddy = (System.getenv("BUDDY_PHONE") ?: buddyProps.getProperty("BUDDY_PHONE") ?: "")
+            .filter { it.isDigit() || it == '+' }
+        buildConfigField("String", "BUDDY_PHONE", "\"$buddy\"")
     }
 
     signingConfigs {
