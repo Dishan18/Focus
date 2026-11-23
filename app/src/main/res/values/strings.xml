@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Regain</string>
+    <string name="guard_description">Regain watches which app is on screen so it can enforce the limits you set. It never reads what you type or see, and nothing leaves your phone.</string>
+</resources>
