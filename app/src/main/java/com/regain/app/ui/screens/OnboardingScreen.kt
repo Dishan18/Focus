@@ -1,6 +1,5 @@
 package com.regain.app.ui.screens
 
-import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -65,13 +64,13 @@ private const val STEPS = 6
 fun OnboardingScreen(onDone: () -> Unit, returning: Boolean) {
     val ctx = LocalContext.current
     var usage by remember { mutableStateOf(Permissions.hasUsageAccess(ctx)) }
-    var access by remember { mutableStateOf(Permissions.hasAccessibility(ctx)) }
+    var overlay by remember { mutableStateOf(Permissions.canDrawOverlays(ctx)) }
     var battery by remember { mutableStateOf(Permissions.isIgnoringBatteryOptimizations(ctx)) }
     LifecycleResumeEffect(Unit) {
         val u = Permissions.hasUsageAccess(ctx)
-        val a = Permissions.hasAccessibility(ctx)
-        if ((u && !usage) || (a && !access)) Haptics.play(Haptics.Kind.Success)
-        usage = u; access = a
+        val o = Permissions.canDrawOverlays(ctx)
+        if ((u && !usage) || (o && !overlay)) Haptics.play(Haptics.Kind.Success)
+        usage = u; overlay = o
         battery = Permissions.isIgnoringBatteryOptimizations(ctx)
         onPauseOrDispose { }
     }
@@ -125,10 +124,14 @@ fun OnboardingScreen(onDone: () -> Unit, returning: Boolean) {
                             onGrant = { Permissions.launch(ctx, Permissions.usageAccessIntent(ctx), Permissions.usageAccessFallbackIntent()) },
                             onNext = { go(2) },
                         )
-                        2 -> AccessibilityStep(
-                            granted = access,
-                            onGrant = { Permissions.launch(ctx, Permissions.accessibilityIntent()) },
-                            onAppInfo = { Permissions.launch(ctx, Permissions.appDetailsIntent(ctx)) },
+                        2 -> PermissionStep(
+                            icon = RIcons.Shield,
+                            title = "Let Focus step in",
+                            body = "To show the pause and time's-up screens over an app, Focus needs to display over other apps. It can't see what's on your screen or what you type.",
+                            granted = overlay,
+                            grantLabel = "Allow display over apps",
+                            hint = "Find Focus in the list and switch it on.",
+                            onGrant = { Permissions.launch(ctx, Permissions.overlayIntent(ctx), Permissions.overlayFallbackIntent()) },
                             onNext = { go(3) },
                         )
                         3 -> BatteryStep(
@@ -138,7 +141,7 @@ fun OnboardingScreen(onDone: () -> Unit, returning: Boolean) {
                             onNext = { go(4) },
                         )
                         4 -> BuddyStep(onNext = { go(5) })
-                        else -> Done(canFinish = usage && access, onFinish = onDone, onBack = { go(if (!usage) 1 else 2) })
+                        else -> Done(canFinish = usage && overlay, onFinish = onDone, onBack = { go(if (!usage) 1 else 2) })
                     }
                 }
             }
@@ -196,51 +199,18 @@ private fun ColumnScope.PermissionStep(
 }
 
 @Composable
-private fun ColumnScope.AccessibilityStep(granted: Boolean, onGrant: () -> Unit, onAppInfo: () -> Unit, onNext: () -> Unit) {
-    StepHeader(
-        RIcons.Shield,
-        "Let Focus step in",
-        "To show the pause and time's-up screens over an app, Focus uses an accessibility service. It only sees which app is open, never what's on screen or what you type.",
-        granted,
-    )
-    if (!granted && Build.VERSION.SDK_INT >= 33) {
-        Spacer(Modifier.height(18.dp))
-        Instructions(
-            "Says “Restricted setting”?",
-            listOf(
-                "Android blocks this for apps installed from outside the Play Store.",
-                "Tap Open App info below, then the three-dot menu in the top-right corner.",
-                "Choose “Allow restricted settings” and confirm.",
-                "Come back here and tap Turn on again.",
-            ),
-        )
-    }
-    Spacer(Modifier.weight(1f))
-    if (granted) {
-        PrimaryButton("Continue", onNext, haptic = Haptics.Kind.Success)
-    } else {
-        RText("Open Installed apps (or Downloaded apps) → Focus → turn it on.", style = RTheme.type.footnote, color = RColors.Secondary, align = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
-        PrimaryButton("Turn on", onGrant)
-        Spacer(Modifier.height(8.dp))
-        GlassButton("Open App info", onAppInfo)
-    }
-    Spacer(Modifier.height(20.dp))
-}
-
-@Composable
 private fun ColumnScope.BatteryStep(unrestricted: Boolean, onBattery: () -> Unit, onAppInfo: () -> Unit, onNext: () -> Unit) {
     StepHeader(
         RIcons.Battery,
         "Keep Focus awake",
-        "Realme phones close background apps aggressively. Focus uses almost no battery, since it only wakes when you switch apps, but it needs permission to stay.",
+        "Realme phones close background apps aggressively. Focus uses very little battery and only works while your screen is on, but it needs permission to stay.",
         unrestricted,
     )
     Spacer(Modifier.height(18.dp))
     Instructions(
         "On Realme",
         listOf(
-            "Open App info → Battery → turn on “Allow background activity”.",
+            "Open App info → Battery usage → turn on “Allow background activity” and “Allow auto launch”.",
             "Open Recents, swipe down on Focus's card (or use its three-dot menu) and choose Lock.",
         ),
     )
@@ -264,7 +234,7 @@ private fun ColumnScope.Done(canFinish: Boolean, onFinish: () -> Unit, onBack: (
     Spacer(Modifier.height(10.dp))
     RText(
         if (canFinish) "Add a limit to your first time-sink app. Focus handles the rest."
-        else "Usage access and the accessibility service are both needed for limits to work.",
+        else "Usage access and display over other apps are both needed for limits to work.",
         color = RColors.Secondary, align = TextAlign.Center,
     )
     Spacer(Modifier.weight(1.2f))

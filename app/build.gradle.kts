@@ -21,8 +21,8 @@ android {
         applicationId = "com.regain.app"
         minSdk = 28
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         // Default accountability-buddy number. Kept out of the public repo:
         // set BUDDY_PHONE as an env var / CI secret, or in buddy.properties.

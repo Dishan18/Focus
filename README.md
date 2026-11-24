@@ -2,7 +2,7 @@
 
 A calm, dark, iOS-styled Android app that helps you use your phone less. It's gentle by default and firm when it needs to be.
 
-Everything stays on the phone: the app has **no internet permission**.
+Everything stays on the phone: the app has **no internet permission**. It also uses **no accessibility service**, so banking and UPI apps (Google Pay, PhonePe, Paytm) work normally alongside it.
 
 ## Features
 
@@ -25,7 +25,6 @@ Everything stays on the phone: the app has **no internet permission**.
 - **Pause and ask why:** a breathing orb plus "Why are you opening it?" before a limited app opens.
 - **Growing delay:** 3 → 5 → 10 → 20 → 30 s per open each day, doubled at night.
 - **Fade:** the screen slowly dims over the last 5 minutes of a limit.
-- **Doomscroll detector:** a buzz and a nudge after 3 minutes of nonstop scrolling.
 - **Unlock counter:** a small "Unlock #23 today" pill each time you unlock.
 - **Morning gate**, **night mode** and **downtime** schedules, plus a gentle **wind-down reminder** at bedtime.
 - **Drain colour** (optional): the screen turns gray in the last 5 minutes. This needs a one-time `adb shell pm grant com.regain.app android.permission.WRITE_SECURE_SETTINGS`.
@@ -47,16 +46,18 @@ Everything stays on the phone: the app has **no internet permission**.
 1. Download the latest `Focus-vX.Y.Z.apk` from **Releases** and open it to install.
 2. Open Focus and follow the setup steps:
    - **Usage access:** switch Focus on.
-   - **Accessibility:** if Android says *"Restricted setting"*, open **App info → three-dot menu → Allow restricted settings**, then turn the service on.
-   - **Realme / ColorOS:** **App info → Battery → Allow background activity**, and lock Focus in Recents.
+   - **Display over other apps:** switch Focus on.
+   - **Realme / ColorOS:** **App info → Battery usage → Allow background activity** and **Allow auto launch**, and lock Focus in Recents.
+
+Updating from v0.2.x: open Focus once after installing. It asks for "Display over other apps", and the old accessibility service disappears by itself.
 
 ## Battery and memory design
 
-- The engine is **event driven**: it wakes only when the app on screen changes, and never polls.
-- Each session sets **one timer** for when its time runs out, and everything stops while the screen is off.
+- The engine is a small foreground service. **Only while the screen is on**, it reads the newest entries of Android's usage log every 0.75 s to see which app is in front: about 0.1 s of CPU per minute. With the screen off it does nothing.
+- Each session sets **one timer** for when its time runs out.
 - Screen time is read from Android's own usage log, not tracked a second time.
-- Scroll events are subscribed to only while a limited app is in front.
-- Overlays are plain Views, and the APK is about 2 MB with R8.
+- Gates open over other apps behind a black cover, so the app disappears at once. If Android ever refuses to open the gate, the cover asks for one tap instead.
+- Overlays are plain Views, and the APK is under 3 MB with R8.
 
 ## Building
 
@@ -72,4 +73,4 @@ To publish a release, push a tag (`git tag v0.1.0 && git push --tags`). CI build
 
 Typeface: Inter (SIL OFL, see `third_party/Inter-OFL.txt`).
 
-Tech: Kotlin, Jetpack Compose (custom iOS-style components, no Material), AccessibilityService, UsageStatsManager. minSdk 28, targetSdk 35.
+Tech: Kotlin, Jetpack Compose (custom iOS-style components, no Material), a foreground service with UsageStatsManager, and overlay windows. minSdk 28, targetSdk 35.

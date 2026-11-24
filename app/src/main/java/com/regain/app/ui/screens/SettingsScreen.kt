@@ -98,10 +98,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                     subtitle = "The screen dims over the last 5 minutes",
                     leading = { IconTile(RIcons.Eye, RColors.Teal) })
                 Hairline(60.dp)
-                SwitchRow("Doomscroll detector", Store.doomscrollOn, { Store.doomscrollOn = it },
-                    subtitle = "A buzz after 3 minutes of nonstop scrolling",
-                    leading = { IconTile(RIcons.Wave, RColors.Pink) })
-                Hairline(60.dp)
                 SwitchRow("Unlock counter", Store.unlockPillOn, { Store.unlockPillOn = it },
                     subtitle = "Shows “Unlock #12 today” each time",
                     leading = { IconTile(RIcons.Phone, RColors.Green) })
@@ -237,17 +233,19 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
         item {
             val usage = Permissions.hasUsageAccess(ctx)
-            val access = Permissions.hasAccessibility(ctx)
+            val overlay = Permissions.canDrawOverlays(ctx)
             val battery = Permissions.isIgnoringBatteryOptimizations(ctx)
             Section(
                 header = "Health check",
-                footer = "On Realme, also open App info → Battery → allow background activity, and lock Focus in Recents so it is never closed.",
+                footer = "On Realme, also open App info → Battery usage → allow background activity and auto launch, and lock Focus in Recents so it is never closed.",
             ) {
                 StatusRow("Usage access", usage) {
                     Permissions.launch(ctx, Permissions.usageAccessIntent(ctx), Permissions.usageAccessFallbackIntent())
                 }
                 Hairline(60.dp)
-                StatusRow("Accessibility service", access) { Permissions.launch(ctx, Permissions.accessibilityIntent()) }
+                StatusRow("Display over other apps", overlay) {
+                    Permissions.launch(ctx, Permissions.overlayIntent(ctx), Permissions.overlayFallbackIntent())
+                }
                 Hairline(60.dp)
                 StatusRow("Unrestricted battery", battery) {
                     Permissions.launch(ctx, Permissions.batteryIntent(ctx), Permissions.appDetailsIntent(ctx))

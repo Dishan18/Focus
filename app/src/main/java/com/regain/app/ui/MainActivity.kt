@@ -74,6 +74,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Starting from the foreground is always allowed; harmless if running.
+        com.regain.app.service.GuardService.start(this)
         com.regain.app.service.GuardService.ownUiResumed()
     }
 
@@ -105,7 +107,7 @@ private fun Root() {
     // Permissions can be revoked any time; re-check whenever we come back.
     var healthy by remember { mutableStateOf(true) }
     LifecycleResumeEffect(Unit) {
-        healthy = Permissions.hasUsageAccess(ctx) && Permissions.hasAccessibility(ctx)
+        healthy = Permissions.ready(ctx)
         onPauseOrDispose { }
     }
 
@@ -113,7 +115,8 @@ private fun Root() {
         OnboardingScreen(onDone = {
             Store.onboarded = true
             onboarded = true
-            healthy = Permissions.hasUsageAccess(ctx) && Permissions.hasAccessibility(ctx)
+            healthy = Permissions.ready(ctx)
+            com.regain.app.service.GuardService.start(ctx)
         }, returning = onboarded)
         return
     }

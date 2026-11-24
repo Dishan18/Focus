@@ -1,14 +1,12 @@
 package com.regain.app.core
 
 import android.app.AppOpsManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
-import com.regain.app.service.GuardService
 
 object Permissions {
 
@@ -21,15 +19,11 @@ object Permissions {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    fun hasAccessibility(context: Context): Boolean {
-        val expected = ComponentName(context, GuardService::class.java)
-        val enabled = Settings.Secure.getString(
-            context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-        ) ?: return false
-        return enabled.split(':').any {
-            ComponentName.unflattenFromString(it)?.let { c -> c == expected } == true
-        }
-    }
+    /** "Display over other apps": needed to show gates over other apps. */
+    fun canDrawOverlays(context: Context): Boolean = Settings.canDrawOverlays(context)
+
+    /** Everything the engine needs to run. */
+    fun ready(context: Context): Boolean = hasUsageAccess(context) && canDrawOverlays(context)
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean =
         context.getSystemService(PowerManager::class.java)
@@ -42,7 +36,10 @@ object Permissions {
 
     fun usageAccessFallbackIntent() = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
-    fun accessibilityIntent() = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+    fun overlayIntent(context: Context) =
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+
+    fun overlayFallbackIntent() = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
 
     fun appDetailsIntent(context: Context) =
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {

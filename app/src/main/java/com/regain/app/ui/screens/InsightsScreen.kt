@@ -94,7 +94,8 @@ fun InsightsScreen(onOpenRecap: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             SpacedRow {
                 StatTile("Extensions", "${counters.sumOf { it.extensions }}", Modifier.weight(1f), accent = RColors.Amber)
-                StatTile("Scroll nudges", "${counters.sumOf { it.doom }}", Modifier.weight(1f), accent = RColors.Pink)
+                val goalMs = Store.dailyGoalMin * TimeUtil.MINUTE
+                StatTile("Days under goal", "${totals.count { it in 1..goalMs }}", Modifier.weight(1f), accent = RColors.Pink)
             }
         }
 

@@ -1,45 +1,63 @@
 package com.regain.app.service
 
-import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.KeyguardManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
-import android.view.accessibility.AccessibilityEvent
-import android.view.inputmethod.InputMethodManager
 import android.util.Log
+import android.view.inputmethod.InputMethodManager
+import androidx.core.app.ServiceCompat
 import com.regain.app.BuildConfig
+import com.regain.app.R
 import com.regain.app.RegainApp
 import com.regain.app.core.Grayscale
 import com.regain.app.core.Haptics
-import com.regain.app.widget.FocusWidget
+import com.regain.app.core.Permissions
 import com.regain.app.core.TimeUtil
 import com.regain.app.data.Store
+import com.regain.app.ui.MainActivity
 import com.regain.app.ui.shield.ShieldActivity
 import com.regain.app.ui.shield.ShieldMode
+import com.regain.app.widget.FocusWidget
 
 /**
- * The engine. Wakes only when the app on screen changes (event driven, no
- * polling), decides whether to let the app through, and sets ONE timer for
- * when its time runs out. Everything stops while the screen is off.
+ * The engine. A small foreground service that, only while the screen is on,
+ * reads the newest entries in Android's usage log about once a second to see
+ * which app is in front. It decides whether to let the app through and sets
+ * ONE timer for when its time runs out. Everything stops while the screen is
+ * off.
  *
- * Heavy work (reading the usage log) runs on a small worker thread; views and
- * activity launches go back to the main thread.
+ * No accessibility service is used, so banking and UPI apps don't block
+ * payments. Gates are shown with the "Display over other apps" permission.
+ *
+ * Heavy work runs on a small worker thread; views and activity launches go
+ * back to the main thread.
  */
-class GuardService : AccessibilityService() {
+class GuardService : Service() {
 
     private lateinit var workerThread: HandlerThread
     private lateinit var worker: Handler
     private val main = Handler(Looper.getMainLooper())
     private lateinit var overlays: Overlays
+    private var usm: UsageStatsManager? = null
+    private var started = false
 
     // Worker-thread state.
     private var current: String? = null
@@ -52,28 +70,31 @@ class GuardService : AccessibilityService() {
     private var launchers: Set<String> = emptySet()
     private var ignored: Set<String> = emptySet()
 
-    // Doomscroll detection.
-    @Volatile private var scrollEnabled = false
-    @Volatile private var lastScrollPosted = 0L
-    private var scrollStreakStart = 0L
-    private var lastScroll = 0L
-    private var lastNudge = 0L
-
+    /** Timestamp of the newest usage event already handled. */
+    private var lastEventTs = 0L
+    private val pollToken = Any()
     private val timerToken = Any()
+    private val shieldToken = Any()
 
     private val app get() = application as RegainApp
 
-    override fun onServiceConnected() {
-        super.onServiceConnected()
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
         instance = this
+        usm = getSystemService(UsageStatsManager::class.java)
         workerThread = HandlerThread("regain-guard").also { it.start() }
         worker = Handler(workerThread.looper)
         overlays = Overlays(this)
+        screenOn = getSystemService(PowerManager::class.java)?.isInteractive != false
+        lastEventTs = System.currentTimeMillis()
         worker.post {
             refreshSystemPackages()
             // Safety: never leave the screen gray from a previous run.
             Grayscale.off(this)
             scheduleWindDown()
+            if (screenOn) startPolling()
         }
 
         val filter = IntentFilter().apply {
@@ -90,30 +111,113 @@ class GuardService : AccessibilityService() {
         registerReceiver(packageReceiver, pkgFilter)
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!started) {
+            started = true
+            val ok = runCatching {
+                ServiceCompat.startForeground(
+                    this, NOTIFICATION_ID, buildNotification(),
+                    if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
+                )
+            }.isSuccess
+            if (!ok) {
+                started = false
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+        return START_STICKY
+    }
+
     override fun onDestroy() {
         instance = null
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { unregisterReceiver(packageReceiver) }
-        main.post { overlays.clearAll() }
+        main.removeCallbacksAndMessages(null)
+        overlays.clearAll()
         Grayscale.off(this)
         if (::workerThread.isInitialized) workerThread.quitSafely()
         super.onDestroy()
     }
 
-    override fun onInterrupt() = Unit
+    private fun buildNotification(): Notification {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26 && nm?.getNotificationChannel(CHANNEL) == null) {
+            nm?.createNotificationChannel(
+                NotificationChannel(CHANNEL, "Focus is active", NotificationManager.IMPORTANCE_MIN).apply {
+                    description = "Keeps your limits working. You can hide this."
+                    setShowBadge(false)
+                    enableVibration(false)
+                    setSound(null, null)
+                },
+            )
+        }
+        val open = PendingIntent.getActivity(
+            this, 1, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return Notification.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_focus)
+            .setContentTitle("Focus is active")
+            .setContentText("Your limits are on.")
+            .setContentIntent(open)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .build()
+    }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        val pkg = event.packageName?.toString() ?: return
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> worker.post { onWindow(pkg) }
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                if (!scrollEnabled) return
-                val now = SystemClock.elapsedRealtime()
-                if (now - lastScrollPosted < 700) return // throttle before hopping threads
-                lastScrollPosted = now
-                worker.post { onScroll(pkg) }
+    // ------------------------------------------------------------ watching
+
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            if (!screenOn) return
+            runCatching { poll() }.onFailure { log("poll failed: $it") }
+            worker.postAtTime(this, pollToken, SystemClock.uptimeMillis() + POLL_MS)
+        }
+    }
+
+    private fun startPolling() {
+        worker.removeCallbacksAndMessages(pollToken)
+        // Don't replay a whole night of events on wake: an hour is plenty.
+        val now = System.currentTimeMillis()
+        if (lastEventTs < now - TimeUtil.HOUR || lastEventTs > now + TimeUtil.MINUTE) lastEventTs = now - TimeUtil.HOUR
+        worker.postAtTime(pollRunnable, pollToken, SystemClock.uptimeMillis())
+    }
+
+    private fun stopPolling() = worker.removeCallbacksAndMessages(pollToken)
+
+    /**
+     * Reads usage events newer than the last one handled and reacts to the
+     * newest app that came to the front. Only the final state matters, so
+     * quick hops through several apps don't flash gates for each of them.
+     */
+    private fun poll() {
+        val usm = usm ?: return
+        val now = System.currentTimeMillis()
+        // The clock went backwards (time zone or manual change): start over.
+        if (lastEventTs > now + TimeUtil.MINUTE) lastEventTs = now - 2_000
+        val events = usm.queryEvents(lastEventTs - 5_000, now + 60_000) ?: return
+        val e = UsageEvents.Event()
+        var candidate: String? = null
+        var newest = lastEventTs
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            if (e.eventType != UsageEvents.Event.ACTIVITY_RESUMED) continue
+            val t = e.timeStamp
+            if (t <= lastEventTs) continue
+            if (t > newest) newest = t
+            val pkg = e.packageName ?: continue
+            candidate = when {
+                // Our own screens are tracked through activity lifecycle
+                // (see ownUiResumed); anything before them is stale.
+                pkg == packageName -> null
+                isRealApp(pkg) -> pkg
+                else -> candidate
             }
         }
+        lastEventTs = newest
+        candidate?.let { onWindow(it) }
     }
 
     // ------------------------------------------------------------ decisions
@@ -129,19 +233,18 @@ class GuardService : AccessibilityService() {
         app.catalog.invalidate()
     }
 
+    /** Transient system windows (keyboards, dialogs, setup screens) aren't app switches. */
+    private fun isRealApp(pkg: String): Boolean {
+        if (pkg in ignored) return false
+        return pkg in launchers || app.catalog.isLaunchable(pkg)
+    }
+
     private fun log(msg: String) { if (BuildConfig.DEBUG) Log.d("RegainGuard", msg) }
 
     private fun onWindow(pkg: String) {
         log("window $pkg current=$current inOwnUi=$inOwnUi pass=$pass")
-        // Our own windows are tracked through activity lifecycle instead
-        // (see ownUiResumed): their accessibility events can arrive late,
-        // e.g. while a gate is animating out, and would cancel live timers.
-        if (pkg == packageName) return
         // Late events from the app underneath a gate must not re-trigger it.
         if (ownUiVisible) return
-        if (pkg in ignored) return
-        // Ignore transient system windows that are not real apps.
-        if (pkg !in launchers && !app.catalog.isLaunchable(pkg)) return
 
         val switched = pkg != current || inOwnUi
         inOwnUi = false
@@ -182,7 +285,6 @@ class GuardService : AccessibilityService() {
         if (Store.pauseOn && pass != pkg) return shield(ShieldMode.Pause, pkg)
 
         schedule(pkg, remaining, tightest.key)
-        setScrollEvents(Store.doomscrollOn)
     }
 
     private fun schedule(pkg: String, remaining: Long, key: String) {
@@ -235,17 +337,37 @@ class GuardService : AccessibilityService() {
 
     private fun leave() {
         cancelTimers()
-        setScrollEvents(false)
-        scrollStreakStart = 0
+        worker.removeCallbacksAndMessages(shieldToken)
+        main.post { overlays.removeCover() }
     }
 
+    /**
+     * Shows a gate. A black cover goes up first so the app disappears at once
+     * (and so Android sees a visible Focus window, which allows the launch).
+     * If the gate still hasn't appeared, we try again, then offer a button.
+     */
     private fun shield(mode: ShieldMode, pkg: String, key: String = pkg) {
         log("shield $mode $pkg $key")
         cancelTimers()
-        setScrollEvents(false)
-        main.post {
+        worker.removeCallbacksAndMessages(shieldToken)
+        val launch = {
             runCatching { startActivity(ShieldActivity.intent(this, mode, pkg, key)) }
+                .onFailure { log("shield launch failed: $it") }
         }
+        main.post {
+            overlays.showCover()
+            launch()
+        }
+        worker.postAtTime({
+            if (!ownUiVisible && current == pkg) { log("shield retry"); main.post { launch() } }
+        }, shieldToken, SystemClock.uptimeMillis() + 1_500)
+        worker.postAtTime({
+            if (!ownUiVisible && current == pkg) {
+                log("shield fallback")
+                val label = app.catalog.label(pkg)
+                main.post { overlays.showCoverButton("$label is paused by Focus") { launch() } }
+            }
+        }, shieldToken, SystemClock.uptimeMillis() + 3_000)
     }
 
     // ------------------------------------------------------------ wind-down
@@ -276,34 +398,6 @@ class GuardService : AccessibilityService() {
         main.postDelayed({ overlays.showPill("It's past $time · time to wind down", 0xFF5B4BDB.toInt(), 3600) }, 600)
     }
 
-    // ------------------------------------------------------------ doomscroll
-
-    private fun setScrollEvents(on: Boolean) {
-        if (scrollEnabled == on) return
-        scrollEnabled = on
-        main.post {
-            val info = serviceInfo ?: return@post
-            info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
-                (if (on) AccessibilityEvent.TYPE_VIEW_SCROLLED else 0)
-            info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            runCatching { serviceInfo = info }
-        }
-    }
-
-    private fun onScroll(pkg: String) {
-        if (pkg != current || inOwnUi) return
-        val t = SystemClock.elapsedRealtime()
-        if (t - lastScroll > 6_000) scrollStreakStart = t
-        lastScroll = t
-        if (t - scrollStreakStart > 3 * TimeUtil.MINUTE && t - lastNudge > 5 * TimeUtil.MINUTE) {
-            lastNudge = t
-            scrollStreakStart = t
-            Store.recordDoomscrollNudge()
-            Haptics.play(Haptics.Kind.Warning)
-            main.post { overlays.showPill("Still scrolling on purpose?", 0xFFFF7EB6.toInt(), 3200) }
-        }
-    }
-
     // ------------------------------------------------------------ screen
 
     private val screenReceiver = object : BroadcastReceiver() {
@@ -312,12 +406,13 @@ class GuardService : AccessibilityService() {
                 Intent.ACTION_SCREEN_OFF -> worker.post {
                     screenOn = false
                     presentHandled = false
+                    stopPolling()
                     leave()
                     worker.removeCallbacksAndMessages(windToken)
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     val locked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
-                    if (!locked) worker.post { onPresent() } else worker.post { screenOn = true }
+                    if (!locked) worker.post { onPresent() } else worker.post { screenOn = true; startPolling() }
                 }
                 Intent.ACTION_USER_PRESENT -> worker.post { onPresent() }
             }
@@ -325,7 +420,7 @@ class GuardService : AccessibilityService() {
     }
 
     private fun onPresent() {
-        screenOn = true
+        if (!screenOn) { screenOn = true; startPolling() }
         if (presentHandled) return
         presentHandled = true
         val n = Store.recordUnlock()
@@ -359,8 +454,10 @@ class GuardService : AccessibilityService() {
         log("own UI resumed")
         inOwnUi = true
         ownUiVisible = true
+        worker.removeCallbacksAndMessages(shieldToken)
         cancelTimers()
-        setScrollEvents(false)
+        // Our screen is drawn now; lift the cover from over it.
+        main.postDelayed({ overlays.removeCover() }, 120)
     }
 
     private fun onOwnUiPaused() = worker.post { ownUiVisible = false }
@@ -371,8 +468,24 @@ class GuardService : AccessibilityService() {
     }
 
     companion object {
+        private const val CHANNEL = "guard"
+        private const val NOTIFICATION_ID = 7
+        private const val POLL_MS = 750L
+
         @Volatile var instance: GuardService? = null
             private set
+
+        /**
+         * Starts the engine if setup is complete. Safe to call often and from
+         * anywhere: Android may refuse a start from the background, which is
+         * fine because the next app open starts it again.
+         */
+        fun start(context: Context) {
+            if (instance != null) return
+            val ctx = context.applicationContext
+            if (!Permissions.hasUsageAccess(ctx) || !Permissions.canDrawOverlays(ctx)) return
+            runCatching { ctx.startForegroundService(Intent(ctx, GuardService::class.java)) }
+        }
 
         /** Let [pkg] through until the user leaves it. */
         fun grantPass(pkg: String) { instance?.allow(pkg) }
@@ -387,9 +500,5 @@ class GuardService : AccessibilityService() {
         fun ownUiPaused() { instance?.onOwnUiPaused() }
 
         fun isRunning(): Boolean = instance != null
-
-        @Suppress("unused")
-        fun isInteractive(context: Context) =
-            context.getSystemService(PowerManager::class.java)?.isInteractive == true
     }
 }

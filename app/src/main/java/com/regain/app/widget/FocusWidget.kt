@@ -35,6 +35,8 @@ import kotlin.math.sin
 class FocusWidget : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+        // A chance to restart the engine if Android stopped it.
+        com.regain.app.service.GuardService.start(context)
         val pending = goAsync()
         io.execute {
             try { render(context.applicationContext, manager, ids) } finally { pending.finish() }

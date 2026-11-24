@@ -1,5 +1,4 @@
 <resources>
     <string name="app_name">Focus</string>
-    <string name="guard_description">Focus watches which app is on screen so it can enforce the limits you set. It never reads what you type or see, and nothing leaves your phone.</string>
     <string name="widget_description">Today\'s screen time, your Bloom, and what\'s left on your limits.</string>
 </resources>

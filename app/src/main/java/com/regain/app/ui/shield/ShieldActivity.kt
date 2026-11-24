@@ -63,6 +63,7 @@ class ShieldActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        GuardService.start(this)
         GuardService.ownUiResumed()
     }
 

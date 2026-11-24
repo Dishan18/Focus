@@ -82,10 +82,6 @@ object Store {
         get() = prefs.getBoolean("fadeOn", true)
         set(v) = edit { putBoolean("fadeOn", v) }
 
-    var doomscrollOn: Boolean
-        get() = prefs.getBoolean("doomscroll", true)
-        set(v) = edit { putBoolean("doomscroll", v) }
-
     var unlockPillOn: Boolean
         get() = prefs.getBoolean("unlockPill", true)
         set(v) = edit { putBoolean("unlockPill", v) }
@@ -450,13 +446,6 @@ object Store {
 
     fun unlocksToday(): Int = today().optInt("unlocks")
     fun firstUnlockToday(): Long? = today().let { if (it.has("firstUnlock")) it.optLong("firstUnlock") else null }
-
-    fun doomscrollNudgesToday(): Int = today().optInt("doom")
-    fun recordDoomscrollNudge() {
-        val o = today()
-        o.put("doom", o.optInt("doom") + 1)
-        saveToday(o)
-    }
 
     /** Morning gate: ms until limited apps open, or 0 if open. */
     fun morningGateRemaining(now: Long = System.currentTimeMillis()): Long {
